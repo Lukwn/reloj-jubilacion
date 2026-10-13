@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Reloj de jubilación</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E⏳%3C/text%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="reloj" aria-label="Reloj de arena: cada grano es un día hasta la jubilación"></canvas>
+
+    <header class="barra">
+      <h1>Reloj de jubilación</h1>
+      <button id="btn-ajustes" class="icono" type="button" aria-label="Ajustes" title="Ajustes">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z" transform="translate(-1 0)"/>
+        </svg>
+      </button>
+    </header>
+
+    <footer class="contador">
+      <p id="contador" aria-live="polite"></p>
+      <p id="pista" class="pista">Cada grano es un día laborable · toca uno para ver su día · agita el ratón o el móvil para remover la arena</p>
+    </footer>
+
+    <div id="tooltip" class="tooltip" role="status" hidden>
+      <strong id="tooltip-fecha"></strong>
+      <span id="tooltip-frase"></span>
+    </div>
+
+    <dialog id="ajustes">
+      <form id="form-ajustes" method="dialog" novalidate>
+        <h2>Tu reloj</h2>
+        <p class="nota">Cada grano es un día laborable: sin sábados, domingos ni festivos. Los datos se quedan en este navegador.</p>
+        <label>Fecha de nacimiento
+          <input type="date" name="birthDate" required />
+        </label>
+        <label>Edad de jubilación
+          <input type="number" name="retirementAge" min="40" max="90" step="1" value="67" required />
+        </label>
+        <label>Inicio de la vida laboral
+          <input type="date" name="workStartDate" required />
+        </label>
+        <fieldset>
+          <legend>Festivos</legend>
+          <p class="nota">Los nacionales (incluido Viernes Santo) ya se descuentan.</p>
+          <label class="check"><input type="checkbox" name="holyThursday" checked /> Jueves Santo</label>
+          <label class="check"><input type="checkbox" name="easterMonday" /> Lunes de Pascua</label>
+          <label>Festivos autonómicos y locales
+            <input type="text" name="extraHolidays" placeholder="24/06, 15/05, 09/11/2027" autocomplete="off" />
+          </label>
+          <p class="nota">DD/MM se repite cada año; DD/MM/AAAA es solo de ese año.</p>
+        </fieldset>
+        <p id="error-ajustes" class="error" role="alert"></p>
+        <div class="acciones">
+          <button type="button" id="btn-cancelar" class="secundario">Cancelar</button>
+          <button type="submit" class="primario">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="fps" class="fps" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
