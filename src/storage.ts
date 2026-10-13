@@ -2,12 +2,20 @@ import type { LifeConfig } from './dates';
 
 const CONFIG_KEY = 'reloj-jubilacion.config.v1';
 const PROGRESS_KEY = 'reloj-jubilacion.progress.v1';
+const LAYERS_KEY = 'reloj-jubilacion.capas.v1';
+const SOUND_KEY = 'reloj-jubilacion.sonido.v1';
+const MILESTONES_KEY = 'reloj-jubilacion.hitos.v1';
 
 export interface Progress {
   startDay: number;
   total: number;
   /** Granos que ya se vieron caer en una visita anterior. */
   landed: number;
+  /**
+   * Inicio y festivos con los que se contaron los granos. Si solo cambia la edad de
+   * jubilación, los granos caídos siguen siendo los mismos y no hace falta repetir la caída.
+   */
+  key?: string;
 }
 
 function read<T>(key: string): T | null {
@@ -46,4 +54,36 @@ export function loadProgress(): Progress | null {
 
 export function saveProgress(p: Progress): void {
   write(PROGRESS_KEY, p);
+}
+
+/** Si la arena se muestra por capas de años. */
+export function loadLayers(): boolean {
+  return read<boolean>(LAYERS_KEY) === true;
+}
+
+export function saveLayers(on: boolean): void {
+  write(LAYERS_KEY, on);
+}
+
+export function loadSound(): boolean {
+  return read<boolean>(SOUND_KEY) === true;
+}
+
+export function saveSound(on: boolean): void {
+  write(SOUND_KEY, on);
+}
+
+/** Hasta qué grano se han celebrado ya los hitos, para no repetirlos en cada visita. */
+export interface MilestonesSeen {
+  key: string;
+  upTo: number;
+}
+
+export function loadMilestonesSeen(): MilestonesSeen | null {
+  const m = read<MilestonesSeen>(MILESTONES_KEY);
+  return m && typeof m.key === 'string' && typeof m.upTo === 'number' ? m : null;
+}
+
+export function saveMilestonesSeen(m: MilestonesSeen): void {
+  write(MILESTONES_KEY, m);
 }

@@ -18,9 +18,12 @@ html, body {
   inset: 0;
   width: 100%;
   height: 100%;
-  touch-action: manipulation;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
   cursor: pointer;
 }
+#reloj.removiendo { cursor: grabbing; }
 
 .barra {
   position: fixed;
@@ -56,8 +59,31 @@ html, body {
   cursor: pointer;
 }
 .icono:hover, .icono:focus-visible { color: var(--fg); }
+.icono[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+#btn-sonido .ondas, #btn-sonido[aria-pressed="true"] .mute { display: none; }
+#btn-sonido[aria-pressed="true"] .ondas { display: inline; }
 
-.botones { display: flex; gap: 8px; }
+/* En pantallas estrechas no caben el título y los cinco botones. */
+@media (max-width: 440px) {
+  .barra h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+
+.botones { display: flex; gap: 8px; margin-left: auto; }
+.barra { gap: 12px; }
+.chip {
+  pointer-events: auto;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--accent);
+  font: 500 13px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chip:hover { background: var(--accent); color: #1d160b; }
+.chip:disabled { opacity: 0.6; cursor: default; }
+.chip:disabled:hover { background: var(--panel); color: var(--accent); }
 
 .menu { position: relative; pointer-events: auto; }
 .menu summary { list-style: none; }
@@ -94,12 +120,39 @@ html, body {
   pointer-events: none;
 }
 .contador p { margin: 0; }
+.contador-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.contador-btn svg { color: var(--muted); flex: none; }
+.contador-btn:hover, .contador-btn:focus-visible, .contador-btn[aria-expanded="true"] { border-color: var(--panel-edge); background: var(--panel); }
+.contador-btn:hover svg, .contador-btn[aria-expanded="true"] svg { color: var(--accent); }
 #contador {
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   color: var(--fg);
   opacity: 0.85;
 }
+.linea2 { display: grid; }
+.linea2 > * { grid-area: 1 / 1; }
+.cuenta {
+  margin-top: 4px !important;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity 1.5s;
+}
+.pista.oculta + .cuenta { opacity: 1; }
 .pista {
   margin-top: 4px !important;
   font-size: 12px;
@@ -120,6 +173,82 @@ html, body {
   font-size: 14px;
 }
 .tooltip strong { display: block; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.tooltip-anio {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-edge);
+  font-size: 13px;
+  color: var(--muted);
+}
+.tooltip-hito {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--accent);
+}
+.tooltip-hito::before { content: "★ "; }
+
+.hito {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  pointer-events: none;
+  animation: hito-entra 0.5s ease-out;
+}
+.hito strong { display: block; font-size: 17px; color: var(--accent); }
+.hito span { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+@keyframes hito-entra {
+  from { opacity: 0; transform: translate(-50%, -12px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+.panel-edad {
+  position: fixed;
+  left: 50%;
+  bottom: calc(max(14px, env(safe-area-inset-bottom)) + 64px);
+  transform: translateX(-50%);
+  width: min(380px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.panel-cab { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.panel-cab strong { font-size: 15px; }
+.cerrar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-edge);
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cerrar:hover { color: var(--fg); }
+.edad-label { display: block; font-size: 14px; color: var(--muted); }
+.edad-label b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.edad-label input { display: block; width: 100%; margin: 8px 0 4px; accent-color: var(--accent); }
+.edad-texto { min-height: 2.6em; margin: 4px 0 12px; font-size: 14px; }
+.edad-texto .menos { color: var(--accent); }
+
+dialog.compartir { width: min(420px, calc(100vw - 32px)); }
+.compartir h2 { margin: 0 0 12px; font-size: 18px; }
+.compartir img { display: block; width: 100%; max-height: 52vh; object-fit: contain; border-radius: 10px; margin-bottom: 10px; }
+
+.etiqueta { padding: 6px 10px; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.etiqueta b { color: var(--accent); }
 
 dialog {
   width: min(380px, calc(100vw - 32px));
@@ -155,16 +284,18 @@ dialog fieldset .nota { margin-bottom: 10px; }
 dialog label.check { display: flex; align-items: center; gap: 8px; color: var(--fg); margin-bottom: 8px; }
 dialog label.check input { display: inline; width: auto; margin: 0; }
 .error { min-height: 1.2em; margin: 0 0 8px; color: #e0705a; font-size: 13px; }
-.acciones { display: flex; justify-content: flex-end; gap: 8px; }
-.acciones button {
+.acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.acciones button, .acciones .boton {
   padding: 8px 16px;
   border-radius: 8px;
   font: inherit;
   cursor: pointer;
   border: 1px solid var(--panel-edge);
 }
+.acciones .boton { display: inline-flex; align-items: center; text-decoration: none; font-size: 15px; }
 .primario { background: var(--accent); color: #1d160b; border-color: transparent !important; font-weight: 600; }
 .secundario { background: transparent; color: var(--fg); }
+.acciones button:disabled { opacity: 0.45; cursor: default; }
 
 .fps {
   position: fixed;

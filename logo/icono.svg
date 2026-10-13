@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2030"/>
+      <stop offset="1" stop-color="#0c0e13"/>
+    </linearGradient>
+    <linearGradient id="arena" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0c97f"/>
+      <stop offset="1" stop-color="#d9a24c"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#fondo)"/>
+  <!-- vidrio -->
+  <path d="M164 122 C164 200 238 226 238 256 C238 286 164 312 164 390 L348 390 C348 312 274 286 274 256 C274 226 348 200 348 122 Z"
+        fill="rgba(190,210,255,0.07)" stroke="rgba(215,228,255,0.75)" stroke-width="9" stroke-linejoin="round"/>
+  <!-- arena de arriba -->
+  <path d="M182 178 C190 214 236 230 248 248 L264 248 C276 230 322 214 330 178 Z" fill="url(#arena)"/>
+  <!-- chorro -->
+  <rect x="252" y="250" width="8" height="112" rx="4" fill="#e2b76c"/>
+  <!-- arena de abajo -->
+  <path d="M176 386 C190 346 230 318 256 314 C282 318 322 346 336 386 Z" fill="url(#arena)"/>
+  <!-- tapas -->
+  <rect x="132" y="92" width="248" height="34" rx="12" fill="#ebe6db"/>
+  <rect x="132" y="386" width="248" height="34" rx="12" fill="#ebe6db"/>
+</svg>

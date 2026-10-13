@@ -16,6 +16,14 @@ export interface DrawFrame {
   heroes: HeroDraw[];
   today: Point | null;
   selected: Point | null;
+  /** Grupo (año) que se resalta atenuando los demás, o -1. */
+  highlight: number;
+  /** Los granos con id >= cutoff se ven casi transparentes («¿y si me jubilo antes?»), o -1. */
+  cutoff: number;
+  /** Granos que marcan un hito: brillan un poco. */
+  marks: Point[];
+  /** Dedo o ratón removiendo la arena (radio en celdas). */
+  finger: (Point & { r: number }) | null;
 }
 
 interface Theme {
@@ -45,6 +53,8 @@ export class Renderer {
   private buf: Uint32Array;
   private glass = new Path2D();
   private theme!: Theme;
+  private dim: Uint32Array | null = null;
+  private groupOf: Uint16Array | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -63,6 +73,13 @@ export class Renderer {
     this.resize();
   }
 
+  /** Cambia la paleta. `dim` es la versión atenuada; con `groupOf` se puede resaltar un grupo. */
+  setColors(colors: Uint32Array, dim: Uint32Array | null = null, groupOf: Uint16Array | null = null): void {
+    this.colors = colors;
+    this.dim = dim;
+    this.groupOf = groupOf;
+  }
+
   refreshTheme(): void {
     const cs = getComputedStyle(document.documentElement);
     const v = (name: string) => cs.getPropertyValue(name).trim();
@@ -76,10 +93,7 @@ export class Renderer {
     };
   }
 
-  resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const cssW = window.innerWidth;
-    const cssH = window.innerHeight;
+  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 3)): void {
     this.dpr = dpr;
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
@@ -139,9 +153,25 @@ export class Renderer {
     const grid = this.sim.grid;
     const buf = this.buf;
     const colors = this.colors;
-    for (let i = 0; i < grid.length; i++) {
-      const v = grid[i];
-      buf[i] = v > 0 ? colors[v - 1] : 0;
+    const { dim, groupOf } = this;
+    const hl = dim && groupOf ? f.highlight : -1;
+    const cut = dim ? f.cutoff : -1;
+    if (dim && (hl >= 0 || cut >= 0)) {
+      for (let i = 0; i < grid.length; i++) {
+        const v = grid[i];
+        if (v <= 0) {
+          buf[i] = 0;
+          continue;
+        }
+        const id = v - 1;
+        const faded = (cut >= 0 && id >= cut) || (hl >= 0 && groupOf![id] !== hl);
+        buf[i] = faded ? dim[id] : colors[id];
+      }
+    } else {
+      for (let i = 0; i < grid.length; i++) {
+        const v = grid[i];
+        buf[i] = v > 0 ? colors[v - 1] : 0;
+      }
     }
     this.offCtx.putImageData(this.img, 0, 0);
 
@@ -153,6 +183,12 @@ export class Renderer {
 
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.off, this.ox, this.oy, W * s, H * s);
+
+    // Hitos pendientes: un brillo pequeño que late despacio
+    if (f.marks.length) {
+      const pulse = 0.5 + 0.3 * Math.sin(f.time / 900);
+      for (const m of f.marks) this.drawGlow(m, Math.max(5 * dpr, s * 3.5), pulse);
+    }
 
     // Grano de hoy, esperando en el cuello
     if (f.today) {
@@ -206,6 +242,19 @@ export class Renderer {
       ctx.stroke();
     }
 
+    // Dedo removiendo la arena
+    if (f.finger) {
+      const px = this.ox + f.finger.x * s;
+      const py = this.oy + f.finger.y * s;
+      ctx.strokeStyle = theme.glassEdge;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.arc(px, py, f.finger.r * s, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     // Grano seleccionado
     if (f.selected) {
       const px = this.ox + f.selected.x * s;
@@ -216,6 +265,19 @@ export class Renderer {
       ctx.arc(px, py, Math.max(6 * dpr, s * 2.2), 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  /**
+   * Dibuja el reloj en un lienzo aparte, de `width` × `height` píxeles, para la imagen de compartir.
+   * Devuelve el lienzo (fondo transparente) y el rectángulo que ocupa el reloj.
+   */
+  snapshot(width: number, height: number, frame: DrawFrame): { canvas: HTMLCanvasElement; box: ReturnType<Renderer['bounds']> } {
+    const canvas = document.createElement('canvas');
+    const r = new Renderer(canvas, this.hg, this.sim, this.colors);
+    r.setColors(this.colors, this.dim, this.groupOf);
+    r.resize(width, height, 1);
+    r.draw(frame);
+    return { canvas, box: r.bounds() };
   }
 
   private drawGlow(p: Point, radius: number, alpha: number): void {

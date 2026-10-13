@@ -19,7 +19,15 @@ Abre http://localhost:5173. La primera vez te pedirá la fecha de nacimiento, la
 ## Cómo se usa
 
 - **Clic o toque en un grano**: muestra su fecha y una frase.
+- **Arrastrar el dedo o el ratón por la arena**: la remueve. En la superficie abre un surco; dentro de la arena compacta, los granos de delante del dedo pasan detrás y se mezclan a lo largo del trazo.
 - **Agitar el ratón rápido sobre el reloj** (o el móvil): la arena se remueve dentro de cada bulbo. El cuello sigue cerrado.
+- **Inclinar el móvil**: la gravedad de la arena sigue la orientación del móvil (`deviceorientation`, beta y gamma). La inclinación se exagera un poco porque en la rejilla la arena no resbala hasta los 45°. Boca abajo, la arena cae al otro extremo de cada bulbo; el cuello sigue cerrado.
+- **Botón de capas**: tiñe la arena por años. Al pasar el ratón (o tocar un grano) se resalta ese año y se ve cuántos días laborables tiene. Con **Ordenar capas** los granos vuelven a su sitio por fecha (solo se intercambian identidades; la forma de la arena no cambia).
+- **Cuenta atrás**: debajo del contador, cuánto falta para que caiga el grano de hoy (o el próximo, si hoy no es laborable). Se alterna con el próximo hito.
+- **Hitos**: 10 %, 25 %, el ecuador, 75 %, 90 %, 1000/2500/5000… días trabajados, los últimos 1000/500/100/10 días y la jubilación. Los tres próximos brillan en la arena; al alcanzar uno sale un aviso. Los ya celebrados se guardan para no repetirlos.
+- **¿Y si me jubilo a otra edad?**: al tocar el contador se abre una barra de edad. Los granos que te ahorrarías se ven transparentes. Cambiar solo la edad no repite la caída de los días ya trabajados.
+- **Compartir**: genera una imagen de 1080 × 1350 con el reloj, los días que quedan y el porcentaje (sin la fecha de nacimiento). Se comparte con el menú del sistema si el navegador lo permite, o se descarga.
+- **Sonido** (apagado por defecto): siseo de arena sintetizado con Web Audio según la arena en movimiento, un «tin» al caer el grano del día y un arpegio en cada hito.
 - **La primera vez** (o al cambiar de vida laboral en ajustes): el reloj empieza lleno arriba y todos los días ya trabajados caen en un chorro de unos 6 segundos. El último cae despacio, con su brillo.
 - **Al volver tras unos días**: caen solo los granos pendientes, de la misma forma.
 
@@ -32,6 +40,8 @@ Con `prefers-reduced-motion` no se puede agitar y las animaciones se reducen al 
 - `src/phrases.ts`: más de 70 frases agrupadas por tipo de día, elegidas de forma determinista según la fecha.
 - `src/hourglass.ts`: geometría del reloj sobre una rejilla. Se dimensiona para que cada bulbo quepa todos los granos con un 12 % de holgura.
 - `src/sim.ts`: arena por autómata celular. Cada celda guarda el ID del grano (ID = número de día laborable desde el inicio). Solo se procesan los granos activos, y los demás duermen. El cuello son celdas sólidas: el grano del día lo atraviesa como animación, fuera de la rejilla.
+- `src/countdown.ts`, `src/milestones.ts`: cuenta atrás e hitos (lógica pura, con tests).
+- `src/sound.ts`: sonido con Web Audio. `src/share.ts`: imagen para compartir.
 - `src/render.ts`: Canvas 2D. Se pinta la arena a un píxel por celda, se escala sin suavizado y encima va el vidrio.
 - Páginas de texto (guía de jubilación, días laborables, preguntas frecuentes, acerca de, privacidad y aviso legal): una carpeta por página con su `index.html`, estilos en `src/pages.css`. La cabecera, el pie, el menú y la URL canónica los inserta un plugin en `vite.config.ts`, donde también están la lista de páginas y los datos del titular. `public/` tiene `robots.txt` y `sitemap.xml`.
 - La configuración y el progreso se guardan en `localStorage`. Si no está disponible, la app funciona igual, solo que sin recordar nada.

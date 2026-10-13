@@ -68,4 +68,144 @@ describe('reloj de arena', () => {
     expect(sim.countRows(0, hg.topEnd)).toBe(1_989);
     expect(sim.countRows(hg.bottomStart, hg.H)).toBe(11);
   });
+
+  it("remover en la superficie abre un hueco y nunca cambia un grano de bulbo", () => {
+    const { hg, sim } = setup(16_000, 3_000);
+    const cx = hg.W / 2;
+    // Superficie de la arena de arriba: primera fila ocupada de la columna central.
+    let top = 0;
+    while (sim.grid[top * hg.W + Math.floor(cx)] <= 0) top++;
+    const inCircle = (x: number, y: number, r: number) => {
+      let n = 0;
+      for (let gy = Math.floor(y - r); gy <= y + r; gy++) {
+        for (let gx = Math.floor(x - r); gx <= x + r; gx++) {
+          if ((gx + 0.5 - x) ** 2 + (gy + 0.5 - y) ** 2 <= r * r && sim.grid[gy * hg.W + gx] > 0) n++;
+        }
+      }
+      return n;
+    };
+    const before = inCircle(cx, top + 2, 6);
+    expect(sim.dig(cx, top + 2, 6, 1, 0)).toBeGreaterThan(0);
+    expect(inCircle(cx, top + 2, 6)).toBeLessThan(before / 3);
+    // Dentro de la arena compacta y justo encima del cuello: mezcla, pero no pasa nada por el cuello.
+    sim.dig(cx, hg.topEnd - 12, 6, 1, 0);
+    sim.dig(cx, hg.topEnd - 2, 6, 0, 1);
+    sim.dig(cx - 4, hg.H - 6, 6, -1, 0);
+    expect(sim.countRows(0, hg.topEnd)).toBe(13_000);
+    expect(sim.countRows(hg.topEnd, hg.bottomStart)).toBe(0);
+    expect(sim.countRows(hg.bottomStart, hg.H)).toBe(3_000);
+  });
+
+  it("pasar el dedo por la arena compacta mezcla los granos del trazo", () => {
+    const { hg, sim } = setup(16_000, 0);
+    const y = hg.topEnd - 20;
+    const before = Array.from(sim.pos);
+    for (let x = hg.W * 0.3; x < hg.W * 0.7; x += 2) sim.dig(x, y, 5, 1, 0);
+    let changed = 0;
+    for (let id = 0; id < 16_000; id++) if (sim.pos[id] !== before[id]) changed++;
+    expect(changed).toBeGreaterThan(50);
+    expect(sim.countRows(0, hg.topEnd)).toBe(16_000);
+  });
+  it("arrastrar por toda la arena conserva las identidades y vuelve a asentarse", () => {
+    const { hg, sim } = setup(8_000, 2_000);
+    for (let f = 0; f < 400; f++) {
+      if (f < 200) {
+        const t = f / 200;
+        // Zigzag por los dos bulbos, de lado a lado y de arriba abajo.
+        const x = hg.W * (0.5 + 0.4 * Math.sin(t * Math.PI * 6));
+        const y = hg.H * t;
+        sim.dig(x, y, 5, Math.cos(t * Math.PI * 6), 1);
+      }
+      sim.step();
+    }
+    expect(sim.countRows(0, hg.topEnd)).toBe(6_000);
+    expect(sim.countRows(hg.bottomStart, hg.H)).toBe(2_000);
+    const cells = new Set<number>();
+    for (let id = 0; id < 8_000; id++) {
+      expect(sim.grid[sim.pos[id]]).toBe(id + 1);
+      cells.add(sim.pos[id]);
+    }
+    expect(cells.size).toBe(8_000);
+    for (let f = 0; f < 3000 && sim.pendingActive > 0; f++) sim.step();
+    expect(sim.pendingActive).toBe(0);
+  });
+
+  it('boca abajo, la arena cae al otro extremo de cada bulbo sin cruzar el cuello', () => {
+    const { hg, sim } = setup(8_000, 2_000);
+    const meanRow = (y0: number, y1: number) => {
+      let sum = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = 0; x < hg.W; x++) {
+          if (sim.grid[y * hg.W + x] > 0) {
+            sum += y;
+            n++;
+          }
+        }
+      }
+      return sum / n;
+    };
+    const topBefore = meanRow(0, hg.topEnd);
+    const bottomBefore = meanRow(hg.bottomStart, hg.H);
+    sim.gravityAngle = Math.PI;
+    sim.wakeAll();
+    for (let f = 0; f < 1500 && (f < 10 || sim.pendingActive > 0); f++) sim.step();
+    expect(meanRow(0, hg.topEnd)).toBeLessThan(topBefore - 10);
+    expect(meanRow(hg.bottomStart, hg.H)).toBeLessThan(bottomBefore - 10);
+    expect(sim.countRows(0, hg.topEnd)).toBe(6_000);
+    expect(sim.countRows(hg.topEnd, hg.bottomStart)).toBe(0);
+    expect(sim.countRows(hg.bottomStart, hg.H)).toBe(2_000);
+    for (let id = 0; id < 8_000; id++) expect(sim.grid[sim.pos[id]]).toBe(id + 1);
+  });
+
+  it('con el móvil inclinado, la arena se amontona hacia ese lado', () => {
+    const { hg, sim } = setup(8_000, 0);
+    const half = (fromX: number, toX: number) => {
+      let n = 0;
+      for (let y = 0; y < hg.topEnd; y++) for (let x = fromX; x < toX; x++) if (sim.grid[y * hg.W + x] > 0) n++;
+      return n;
+    };
+    sim.gravityAngle = 1.2;
+    sim.wakeAll();
+    for (let f = 0; f < 1500; f++) {
+      if (f % 50 === 0) sim.wakeAll();
+      sim.step();
+    }
+    const mid = Math.floor(hg.W / 2);
+    expect(half(mid, hg.W)).toBeGreaterThan(half(0, mid) * 1.15);
+    expect(sim.countRows(0, hg.topEnd)).toBe(8_000);
+  });
+
+  it('ordenar deja cada bulbo por fecha, sin mover la arena de sitio', () => {
+    const { hg, sim } = setup(8_000, 2_000);
+    for (let f = 0; f < 200; f++) {
+      if (f < 100) {
+        sim.agitation = 1;
+        if (f % 15 === 0) sim.wakeAll();
+      } else sim.agitation = 0;
+      sim.step();
+    }
+    const occupied = Array.from(sim.grid, (v) => v > 0);
+    sim.startSort();
+    let guard = 0;
+    while (sim.sortStep(0.05) && guard++ < 100);
+    expect(sim.sorting).toBe(false);
+    expect(Array.from(sim.grid, (v) => v > 0)).toEqual(occupied);
+    // De abajo arriba y desde el centro, los ids de cada bulbo van en orden creciente.
+    for (const [y0, y1] of [
+      [0, hg.topEnd],
+      [hg.bottomStart, hg.H],
+    ]) {
+      let prev = -1;
+      for (let y = y1 - 1; y >= y0; y--) {
+        for (let i = 0; i < hg.W; i++) {
+          const v = sim.grid[y * hg.W + hg.centerOrder[i]];
+          if (v <= 0) continue;
+          expect(v - 1).toBeGreaterThan(prev);
+          prev = v - 1;
+        }
+      }
+    }
+    expect(sim.countRows(0, hg.topEnd)).toBe(6_000);
+  });
 });

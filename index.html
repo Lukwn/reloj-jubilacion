@@ -14,7 +14,25 @@
 
     <header class="barra">
       <h1>Reloj de jubilación</h1>
+      <button id="btn-ordenar" class="chip" type="button" hidden>Ordenar capas</button>
       <div class="botones">
+      <button id="btn-capas" class="icono" type="button" aria-pressed="false" aria-label="Capas por años" title="Capas por años">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M12 3 2 8l10 5 10-5-10-5Zm-7.6 8.6L2 12.8l10 5 10-5-2.4-1.2L12 15.4l-7.6-3.8Zm0 4.4L2 17.2l10 5 10-5-2.4-1.2L12 19.8 4.4 16Z"/>
+        </svg>
+      </button>
+      <button id="btn-sonido" class="icono" type="button" aria-pressed="false" aria-label="Sonido" title="Sonido">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>
+          <path class="ondas" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>
+          <path class="mute" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m15.5 9.5 5 5m0-5-5 5"/>
+        </svg>
+      </button>
+      <button id="btn-compartir" class="icono" type="button" aria-label="Compartir mi reloj" title="Compartir mi reloj">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15V4m0 0L8 8m4-4 4 4M6 12v6.5A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5V12"/>
+        </svg>
+      </button>
       <details id="menu" class="menu">
         <summary class="icono" aria-label="Más información" title="Más información">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -33,15 +51,62 @@
       </div>
     </header>
 
+    <div id="hito" class="hito" role="status" hidden>
+      <strong id="hito-titulo"></strong>
+      <span id="hito-fecha"></span>
+    </div>
+
     <footer class="contador">
-      <p id="contador" aria-live="polite"></p>
-      <p id="pista" class="pista">Cada grano es un día laborable · toca uno para ver su día · agita el ratón o el móvil para remover la arena</p>
+      <button id="btn-edad" class="contador-btn" type="button" title="¿Y si me jubilo a otra edad?" aria-controls="panel-edad" aria-expanded="false">
+        <span id="contador" aria-live="polite"></span>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 8h9m4 0h3M4 16h3m4 0h9"/>
+          <circle cx="15" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <circle cx="9" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        </svg>
+      </button>
+      <div class="linea2">
+        <p id="pista" class="pista">Cada grano es un día laborable · toca uno para ver su día · arrastra o agita para remover la arena</p>
+        <p id="cuenta" class="cuenta"></p>
+      </div>
     </footer>
+
+    <section id="panel-edad" class="panel-edad" aria-label="¿Y si me jubilo a otra edad?" hidden>
+      <div class="panel-cab">
+        <strong>¿Y si me jubilo a otra edad?</strong>
+        <button id="btn-edad-cerrar" class="cerrar" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <label class="edad-label">
+        <span>Edad de jubilación: <b id="edad-valor">67</b> años</span>
+        <input id="edad" type="range" min="60" max="70" step="1" value="67" />
+      </label>
+      <p id="edad-texto" class="edad-texto"></p>
+      <div class="acciones">
+        <button id="btn-edad-usar" type="button" class="primario">Usar esta edad</button>
+      </div>
+    </section>
+
+    <dialog id="compartir" class="compartir">
+      <h2>Comparte tu reloj</h2>
+      <img id="compartir-img" alt="Tu reloj de jubilación con los días laborables que te quedan" />
+      <p class="nota">La imagen solo muestra los días que te quedan y el porcentaje, no tu fecha de nacimiento.</p>
+      <p id="compartir-estado" class="nota" role="status"></p>
+      <div class="acciones">
+        <button id="btn-compartir-cerrar" type="button" class="secundario">Cerrar</button>
+        <button id="btn-compartir-copiar" type="button" class="secundario">Copiar texto</button>
+        <a id="btn-compartir-descargar" class="boton secundario" download="mi-reloj-de-jubilacion.png">Descargar</a>
+        <button id="btn-compartir-sistema" type="button" class="primario">Compartir…</button>
+      </div>
+    </dialog>
 
     <div id="tooltip" class="tooltip" role="status" hidden>
       <strong id="tooltip-fecha"></strong>
       <span id="tooltip-frase"></span>
+      <span id="tooltip-anio" class="tooltip-anio" hidden></span>
+      <span id="tooltip-hito" class="tooltip-hito" hidden></span>
     </div>
+
+    <div id="etiqueta-anio" class="tooltip etiqueta" role="status" hidden></div>
 
     <dialog id="ajustes">
       <form id="form-ajustes" method="dialog" novalidate>

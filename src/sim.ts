@@ -20,9 +20,21 @@ export class SandSim {
   agitation = 0;
   /** -1..1: inclinación lateral de la gravedad mientras se agita. */
   tilt = 0;
+  /**
+   * Dirección de la gravedad en radianes: 0 = hacia abajo, π/2 = hacia la derecha, π = boca
+   * abajo. La cambia el giroscopio del móvil; `tilt` la inclina un poco más mientras se agita.
+   */
+  gravityAngle = 0;
+
+  /** La gravedad apunta más hacia arriba que hacia abajo: el reloj está boca abajo. */
+  get gravityUp(): boolean {
+    return Math.cos(this.gravityAngle) < 0;
+  }
   /** Granos procesados en el último paso. */
   activeCount = 0;
 
+  /** Desplazamiento de índice de las 8 direcciones (0 abajo, 1 abajo-derecha, 2 derecha… 7 abajo-izquierda). */
+  private readonly dirs: Int32Array;
   private cur: Int32Array;
   private nxt: Int32Array;
   private nxtCount = 0;
@@ -48,6 +60,8 @@ export class SandSim {
     this.mark = new Int32Array(grainCount);
     this.still = new Uint8Array(grainCount);
     this.seed = seed | 0 || 1;
+    const W = hg.W;
+    this.dirs = Int32Array.from([W, W + 1, 1, -W + 1, -W, -W - 1, -1, W - 1]);
   }
 
   rand(): number {
@@ -131,6 +145,12 @@ export class SandSim {
     }
     this.wakeCell(idx - 1);
     this.wakeCell(idx + 1);
+    // Con la gravedad girada, también pueden caer al hueco los de debajo.
+    if (this.gravityAngle !== 0 && idx + W + 1 < this.grid.length) {
+      this.wakeCell(idx + W - 1);
+      this.wakeCell(idx + W);
+      this.wakeCell(idx + W + 1);
+    }
   }
 
   wakeAll(): void {
@@ -160,25 +180,30 @@ export class SandSim {
     const g = this.grid;
     const pos = this.pos;
     const still = this.still;
-    const W = this.W;
-    const lastRow = (this.H - 1) * W;
-    const tabs = Math.abs(this.tilt);
-    const tdir = this.tilt > 0 ? 1 : -1;
+    // Las 8 direcciones de la rejilla, en orden de ángulo: 0 abajo, 2 derecha, 4 arriba, 6 izquierda.
+    const dirs = this.dirs;
+    // Gravedad entre dos direcciones: cada grano cae por una u otra según lo cerca que esté.
+    const angle = this.gravityAngle + this.tilt * 0.6;
+    let u = (angle / (Math.PI / 4)) % 8;
+    if (u < 0) u += 8;
+    const k0 = Math.floor(u);
+    const frac = u - k0;
 
     for (let i = 0; i < n; i++) {
       const id = list[i];
       const idx = pos[id];
       if (idx < 0) continue;
       let target = -1;
-      if (idx < lastRow) {
-        const b = idx + W;
-        if (g[b] === EMPTY) target = b;
-        else {
-          const d = tabs > 0 && this.rand() < tabs ? tdir : this.rand() < 0.5 ? -1 : 1;
-          if (g[b + d] === EMPTY) target = b + d;
-          else if (g[b - d] === EMPTY) target = b - d;
-          else if (tabs > 0.05 && g[idx + tdir] === EMPTY && this.rand() < tabs * 0.6) target = idx + tdir;
-        }
+      // Hacia la gravedad; si está ocupado, por una de las dos diagonales (ángulo de reposo).
+      const k = this.rand() < frac ? (k0 + 1) & 7 : k0;
+      const fall = idx + dirs[k];
+      if (g[fall] === EMPTY) target = fall;
+      else {
+        const side = this.rand() < 0.5 ? 1 : 7;
+        const a = idx + dirs[(k + side) & 7];
+        const b = idx + dirs[(k + 8 - side) & 7];
+        if (g[a] === EMPTY) target = a;
+        else if (g[b] === EMPTY) target = b;
       }
       if (target >= 0) {
         g[target] = id + 1;
@@ -194,11 +219,13 @@ export class SandSim {
     }
   }
 
-  /** Lanza granos de la superficie hacia arriba y mezcla identidades entre vecinos. */
+  /** Lanza granos de la superficie contra la gravedad y mezcla identidades entre vecinos. */
   private agitate(): void {
     const a = Math.min(1, this.agitation);
     const { W, H, topEnd, bottomStart } = this.hg;
     const g = this.grid;
+    // Hacia dónde salen despedidos: contra la gravedad.
+    const dir = this.gravityUp ? 1 : -1;
 
     const launches = Math.ceil(a * W * 0.3);
     for (let k = 0; k < launches; k++) {
@@ -206,12 +233,13 @@ export class SandSim {
       const y0 = top ? 0 : bottomStart;
       const y1 = top ? topEnd : H;
       const x = 1 + Math.floor(this.rand() * (W - 2));
-      let y = y0;
-      while (y < y1 && g[y * W + x] <= EMPTY) y++;
-      if (y >= y1) continue;
+      // Superficie de la columna: el primer grano empezando por el lado libre.
+      let y = dir < 0 ? y0 : y1 - 1;
+      while (y >= y0 && y < y1 && g[y * W + x] <= EMPTY) y -= dir;
+      if (y < y0 || y >= y1) continue;
       let h = 1 + Math.floor(this.rand() * a * 16);
       let ty = y;
-      while (h-- > 0 && ty - 1 >= y0 && g[(ty - 1) * W + x] === EMPTY) ty--;
+      while (h-- > 0 && ty + dir >= y0 && ty + dir < y1 && g[(ty + dir) * W + x] === EMPTY) ty += dir;
       if (ty === y) continue;
       const from = y * W + x;
       const id = g[from] - 1;
@@ -229,6 +257,194 @@ export class SandSim {
       const nb = idx + offsets[Math.floor(this.rand() * 8)];
       if (nb >= 0 && nb < g.length && g[nb] > 0) this.swapCells(idx, nb);
     }
+  }
+
+  /**
+   * Remueve la arena de un círculo (el dedo o el ratón al arrastrar) sin sacar ningún grano
+   * de su bulbo. (cx, cy) y r van en celdas; (dx, dy) es la dirección del arrastre.
+   * - Cerca de la superficie, cada grano se aparta a la celda libre más próxima fuera del
+   *   círculo: se abre un surco con la arena amontonada a los lados.
+   * - Dentro de la arena compacta no hay sitio libre cerca, así que los granos de delante del
+   *   dedo pasan detrás (se intercambian), como al pasar un palo: la arena se mezcla a lo largo
+   *   del trazo. Devuelve los granos movidos o intercambiados.
+   */
+  dig(cx: number, cy: number, r: number, dx: number, dy: number): number {
+    const { W, H, topEnd, bottomStart } = this.hg;
+    const g = this.grid;
+    const dl = Math.hypot(dx, dy);
+    const ux = dl > 0 ? dx / dl : 0;
+    const uy = dl > 0 ? dy / dl : 0;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(W - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(H - 1, Math.ceil(cy + r));
+    let moved = 0;
+    for (let y = y0; y <= y1; y++) {
+      // El bulbo de cada fila: los granos nunca cambian de bulbo (el cuello es sólido).
+      const lo = y < topEnd ? 0 : bottomStart;
+      const hi = y < topEnd ? topEnd : H;
+      for (let x = x0; x <= x1; x++) {
+        const ox = x + 0.5 - cx;
+        const oy = y + 0.5 - cy;
+        if (ox * ox + oy * oy > r * r) continue;
+        const from = y * W + x;
+        const v = g[from];
+        if (v <= 0) continue;
+        const to = this.pushTarget(x, y, ox, oy, ux, uy, cx, cy, r, lo, hi);
+        if (to >= 0) {
+          g[from] = EMPTY;
+          this.put(v - 1, to);
+          this.wakeAround(from);
+          moved++;
+          continue;
+        }
+        // Arena compacta: lo de delante del dedo pasa detrás, reflejado respecto a su centro.
+        const ahead = ox * ux + oy * uy;
+        if (dl === 0 || ahead <= 0) continue;
+        const bx = Math.floor(x + 0.5 - 2 * ahead * ux + (this.rand() - 0.5) * 2);
+        const by = Math.floor(y + 0.5 - 2 * ahead * uy);
+        if (bx < 0 || bx >= W || by < lo || by >= hi) continue;
+        const back = by * W + bx;
+        const bv = g[back];
+        if (bv === WALL || back === from) continue;
+        if (bv === EMPTY) {
+          g[from] = EMPTY;
+          this.put(v - 1, back);
+          this.wakeAround(from);
+        } else {
+          this.swapCells(from, back);
+          this.wake(v - 1);
+          this.wake(bv - 1);
+        }
+        moved++;
+      }
+    }
+    return moved;
+  }
+
+  /** Primera celda libre fuera del círculo en la dirección de empuje del grano, o -1. */
+  private pushTarget(
+    x: number,
+    y: number,
+    ox: number,
+    oy: number,
+    ux: number,
+    uy: number,
+    cx: number,
+    cy: number,
+    r: number,
+    lo: number,
+    hi: number,
+  ): number {
+    const W = this.W;
+    const g = this.grid;
+    const ol = Math.hypot(ox, oy);
+    // Hacia fuera del dedo, un poco hacia donde se arrastra y un poco hacia arriba,
+    // para que la arena apartada se amontone en los bordes del surco.
+    let bx = (ol > 0.01 ? ox / ol : 0) + ux * 0.8;
+    const against = this.gravityUp ? 1 : -1;
+    let by = (ol > 0.01 ? oy / ol : against) + uy * 0.8 + 0.35 * against;
+    const bl = Math.hypot(bx, by) || 1;
+    bx /= bl;
+    by /= bl;
+    const dirs = [
+      [bx, by],
+      [bx * 0.8 - by * 0.6, bx * 0.6 + by * 0.8],
+      [bx * 0.8 + by * 0.6, -bx * 0.6 + by * 0.8],
+      [0, against],
+    ];
+    // Solo celdas cercanas: la arena apartada se queda junto al dedo, no salta lejos.
+    const maxT = 2 * r + 4;
+    for (const [ddx, ddy] of dirs) {
+      for (let t = 0.75; t < maxT; t += 0.75) {
+        const px = x + 0.5 + ddx * t;
+        const py = y + 0.5 + ddy * t;
+        const gx = Math.floor(px);
+        const gy = Math.floor(py);
+        if (gx < 0 || gx >= W || gy < lo || gy >= hi) break;
+        const c = g[gy * W + gx];
+        if (c === WALL) break;
+        if (c !== EMPTY) continue;
+        if ((gx + 0.5 - cx) ** 2 + (gy + 0.5 - cy) ** 2 <= r * r) continue;
+        return gy * W + gx;
+      }
+    }
+    return -1;
+  }
+
+  /** Ordenación en curso: celdas de cada bulbo en orden y el id que debe acabar en cada una. */
+  private sortCells: Int32Array[] = [];
+  private sortIds: Int32Array[] = [];
+  private sortAt: number[] = [];
+
+  get sorting(): boolean {
+    return this.sortCells.some((c, i) => this.sortAt[i] < c.length);
+  }
+
+  /**
+   * Empieza a ordenar los granos por fecha dentro de cada bulbo, sin cambiar la forma de la
+   * arena: el más antiguo de cada bulbo, abajo (arriba, junto al cuello) y desde el centro,
+   * igual que al empaquetar. Se avanza con `sortStep`.
+   */
+  startSort(): void {
+    const { W, H, topEnd, bottomStart, centerOrder } = this.hg;
+    const g = this.grid;
+    this.sortCells = [];
+    this.sortIds = [];
+    this.sortAt = [];
+    for (const [y0, y1] of [
+      [0, topEnd],
+      [bottomStart, H],
+    ]) {
+      const cells: number[] = [];
+      const ids: number[] = [];
+      for (let y = y1 - 1; y >= y0; y--) {
+        for (let i = 0; i < W; i++) {
+          const idx = y * W + centerOrder[i];
+          if (g[idx] > 0) {
+            cells.push(idx);
+            ids.push(g[idx] - 1);
+          }
+        }
+      }
+      ids.sort((a, b) => a - b);
+      this.sortCells.push(Int32Array.from(cells));
+      this.sortIds.push(Int32Array.from(ids));
+      this.sortAt.push(0);
+    }
+  }
+
+  /**
+   * Coloca en su sitio una fracción de los granos de cada bulbo (de abajo arriba), intercambiándolos.
+   * Solo cambia qué grano ocupa cada celda, nunca dónde hay arena. Devuelve si queda trabajo.
+   */
+  sortStep(fraction: number): boolean {
+    const g = this.grid;
+    const split = this.hg.topEnd * this.W;
+    for (let b = 0; b < this.sortCells.length; b++) {
+      const top = b === 0;
+      const cells = this.sortCells[b];
+      const ids = this.sortIds[b];
+      const end = Math.min(cells.length, this.sortAt[b] + Math.ceil(cells.length * fraction));
+      for (let i = this.sortAt[b]; i < end; i++) {
+        const cell = cells[i];
+        const id = ids[i];
+        const from = this.pos[id];
+        // Si la arena se ha movido mientras tanto (o el grano está cayendo), se salta.
+        if (from < 0 || from === cell || g[cell] <= 0) continue;
+        // Un grano que ha cruzado el cuello mientras tanto ya no es de este bulbo.
+        if (top !== from < split) continue;
+        this.swapCells(cell, from);
+      }
+      this.sortAt[b] = end;
+    }
+    return this.sorting;
+  }
+
+  stopSort(): void {
+    this.sortCells = [];
+    this.sortIds = [];
+    this.sortAt = [];
   }
 
   /** Celda ocupada del bulbo superior más cercana al cuello. */
