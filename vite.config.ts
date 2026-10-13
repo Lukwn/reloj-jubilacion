@@ -12,6 +12,9 @@ const TITULAR = {
   correo: 'hola@relojdejubilacion.com',
 };
 
+// ID de editor de Google AdSense (también en public/ads.txt).
+const ADSENSE_CLIENT = 'ca-pub-8276224601726776';
+
 // Páginas de texto. El orden es el del menú del pie.
 const PAGINAS = [
   { ruta: 'jubilacion-en-espana', menu: 'Edad de jubilación' },
@@ -22,7 +25,10 @@ const PAGINAS = [
   { ruta: 'aviso-legal', menu: 'Aviso legal' },
 ];
 
-/** Inserta la cabecera, el pie y la URL canónica comunes en las páginas de texto. */
+/**
+ * Inserta la cabecera, el pie y la URL canónica comunes en las páginas de texto,
+ * y el script de AdSense en todas las páginas (solo en el build, no en desarrollo).
+ */
 function paginasDeTexto(): Plugin {
   return {
     name: 'paginas-de-texto',
@@ -52,7 +58,14 @@ function paginasDeTexto(): Plugin {
         .replace('<!--canonica-->', `<link rel="canonical" href="${SITE_URL}/${actual ? actual + '/' : ''}" />`)
         .replaceAll('%TITULAR_NOMBRE%', TITULAR.nombre)
         .replaceAll('%TITULAR_CORREO%', TITULAR.correo)
-        .replaceAll('%MENU_PAGINAS%', enlaces);
+        .replaceAll('%MENU_PAGINAS%', enlaces)
+        .replace(
+          '</head>',
+          ctx.server
+            ? '</head>'
+            : `  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}" crossorigin="anonymous"></script>
+  </head>`,
+        );
     },
   };
 }
