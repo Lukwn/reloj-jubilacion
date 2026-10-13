@@ -1,0 +1,9 @@
+// Despliegue en Cloudflare Workers como web estática: solo sirve la carpeta dist.
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "reloj-jubilacion",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "./dist"
+  }
+}
