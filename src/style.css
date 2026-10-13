@@ -124,6 +124,52 @@ html, body {
   pointer-events: none;
 }
 .contador p { margin: 0; }
+.fila-contador { display: inline-flex; align-items: center; gap: 6px; }
+.play-btn {
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0 0 0 2px;
+}
+.play-btn:hover, .play-btn:focus-visible { background: var(--accent); color: #1d160b; }
+.play-btn[hidden] { display: none; }
+
+.panel-play {
+  position: fixed;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px));
+  padding: 10px 14px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.play-fila { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.play-fila + .play-fila { margin-top: 6px; }
+.play-fecha {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.play-botones { display: flex; gap: 8px; }
+.primario-icono { background: var(--accent); color: #1d160b !important; border-color: transparent; }
+#btn-play-pausa .i-play, #btn-play-pausa.pausado .i-pausa { display: none; }
+#btn-play-pausa.pausado .i-play { display: inline; }
+.play-velocidad { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); text-align: right; }
+.play-velocidad input { width: 100%; accent-color: var(--accent); margin: 0; }
+.play-estado { min-height: 1.3em; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+
 .contador-btn {
   pointer-events: auto;
   display: inline-flex;
@@ -210,6 +256,8 @@ html, body {
   pointer-events: none;
   animation: hito-entra 0.5s ease-out;
 }
+.hito { z-index: 10; }
+.hito.en-reproduccion { border-style: dashed; }
 .hito strong { display: block; font-size: 17px; color: var(--accent); }
 .hito span { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
 @keyframes hito-entra {
@@ -310,4 +358,10 @@ dialog label.check input { display: inline; width: auto; margin: 0; }
   bottom: 12px;
   font: 12px ui-monospace, monospace;
   color: var(--muted);
+}
+
+/* En pantallas estrechas, el contador y el botón de reproducir caben en una línea. */
+@media (max-width: 440px) {
+  #contador { font-size: 14px; }
+  .contador-btn { padding: 3px 8px; }
 }

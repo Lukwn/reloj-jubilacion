@@ -62,6 +62,8 @@ export class Renderer {
   private glass = new Path2D();
   private theme!: Theme;
   private dim: Uint32Array | null = null;
+  /** Espacio extra arriba (px CSS), para el panel de reproducción. Tras cambiarlo hay que llamar a `resize`. */
+  topExtra = 0;
   /** Giro y escala con los que se dibujó el último fotograma, para deshacerlos al tocar. */
   private rot = 0;
   private rotScale = 1;
@@ -111,10 +113,11 @@ export class Renderer {
     this.canvas.height = Math.round(cssH * dpr);
     const { W, H } = this.hg;
     const availW = (cssW - 32) * dpr;
-    const availH = (cssH - TOP_RESERVE - BOTTOM_RESERVE - CAP_CSS * 2) * dpr;
+    const top = TOP_RESERVE + this.topExtra;
+    const availH = (cssH - top - BOTTOM_RESERVE - CAP_CSS * 2) * dpr;
     this.s = Math.max(0.5, Math.min(availW / (W + 4), availH / H));
     this.ox = Math.round((this.canvas.width - W * this.s) / 2);
-    this.oy = Math.round((TOP_RESERVE + CAP_CSS) * dpr + (availH - H * this.s) / 2);
+    this.oy = Math.round((top + CAP_CSS) * dpr + (availH - H * this.s) / 2);
     this.glass = this.buildGlassPath();
   }
 
@@ -216,7 +219,7 @@ export class Renderer {
       const cos = Math.abs(Math.cos(this.rot));
       const sin = Math.abs(Math.sin(this.rot));
       const availW = this.canvas.width - 32 * dpr;
-      const availH = this.canvas.height - (TOP_RESERVE + BOTTOM_RESERVE) * dpr;
+      const availH = this.canvas.height - (TOP_RESERVE + this.topExtra + BOTTOM_RESERVE) * dpr;
       this.rotScale = Math.min(1, availW / (w * cos + h * sin), availH / (w * sin + h * cos));
       ctx.translate(c.x, c.y);
       ctx.rotate(this.rot);

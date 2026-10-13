@@ -47,6 +47,15 @@ const tooltipWhen = $('tooltip-cuando');
 const lensLabel = $('etiqueta-lupa');
 const layersBtn = $<HTMLButtonElement>('btn-capas');
 const sortBtn = $<HTMLButtonElement>('btn-ordenar');
+const playBtn = $<HTMLButtonElement>('btn-play');
+const playPanel = $('panel-play');
+const playDate = $('play-fecha');
+const playStatus = $('play-estado');
+const playStart = $<HTMLButtonElement>('btn-play-inicio');
+const playPause = $<HTMLButtonElement>('btn-play-pausa');
+const playClose = $<HTMLButtonElement>('btn-play-cerrar');
+const playSpeed = $<HTMLInputElement>('play-velocidad');
+const playSpeedLabel = $('play-vel');
 const tooltipMilestone = $('tooltip-hito');
 const soundBtn = $<HTMLButtonElement>('btn-sonido');
 const shareBtn = $<HTMLButtonElement>('btn-compartir');
@@ -133,7 +142,8 @@ function lifeKey(cfg: LifeConfig): string {
   return JSON.stringify([cfg.workStartDate, cfg.holyThursday ?? true, cfg.easterMonday ?? false, (cfg.extraHolidays ?? '').trim()]);
 }
 
-function createWorld(cfg: LifeConfig): void {
+/** `shownOverride`: granos que empiezan ya caídos (0 para reproducir desde el principio). */
+function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   const life = buildLife(cfg);
   const today = localDayNumber();
   const target = fallenCount(life, today);
@@ -142,7 +152,7 @@ function createWorld(cfg: LifeConfig): void {
   const sameLife = prog && prog.startDay === life.startDay && (prog.key ? prog.key === key : prog.total === life.total);
   // Primera visita (o vida laboral nueva): el reloj empieza lleno arriba y los días ya
   // vividos caen delante de ti. Si vuelves tras unos días, caen solo los pendientes.
-  const shown = sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0;
+  const shown = shownOverride ?? (sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
 
   const hg = designHourglass(life.total);
   const sim = new SandSim(hg, life.total);
@@ -150,6 +160,10 @@ function createWorld(cfg: LifeConfig): void {
   const sandColors = grainColors(life);
   const layers = yearLayers(life);
   const renderer = new Renderer(canvas, hg, sim, sandColors);
+  if (topExtra) {
+    renderer.topExtra = topExtra;
+    renderer.resize();
+  }
   const milestones = milestonesFor(life.total);
   // La primera vez, los hitos ya pasados no se celebran (caerían todos de golpe).
   const seen = loadMilestonesSeen();
@@ -187,13 +201,15 @@ function createWorld(cfg: LifeConfig): void {
 }
 
 function persistProgress(w: World): void {
+  // Lo que pasa durante una reproducción no es real: no se guarda.
+  if (play) return;
   saveProgress({ startDay: w.life.startDay, total: w.life.total, landed: w.landed, key: w.key });
   saveMilestonesSeen({ key: w.key, upTo: w.seenUpTo });
 }
 
 function checkDay(): void {
   const w = world;
-  if (!w) return;
+  if (!w || play) return;
   w.today = localDayNumber();
   w.target = fallenCount(w.life, w.today);
   updateCounter();
@@ -237,9 +253,18 @@ function landHero(w: World, h: Hero): void {
   if (idx >= 0) w.sim.put(h.id, idx);
   w.landed++;
   const m = w.milestoneById.get(h.id);
-  if (m && h.id >= w.seenUpTo) w.pendingMilestone = m;
+  // Reproduciendo, cada hito se celebra al momento (y no cuenta como visto de verdad).
+  // (A gran velocidad caen varios por fotograma: solo cuenta un hito posterior al último celebrado.)
+  if (m && play) {
+    if (m.id > play.celebrated) {
+      play.celebrated = m.id;
+      celebrate(w, m);
+    }
+  }
+  else if (m && h.id >= w.seenUpTo) w.pendingMilestone = m;
   if (w.landed > w.seenUpTo) w.seenUpTo = w.landed;
   if (h.bright >= 1) sound.tink();
+  else if (play && SPEEDS[speedIdx][0] <= 7) sound.tink(0.45);
   // Durante una recuperación larga no hace falta guardar en cada grano.
   if (w.heroes.length === 0 || w.landed % 50 === 0) persistProgress(w);
   updateCounter();
@@ -258,6 +283,11 @@ function updateDrops(w: World, now: number): void {
       w.heroes.splice(i, 1);
       landHero(w, h);
     }
+  }
+
+  if (play) {
+    spawnPlayGrains(w, now);
+    return;
   }
 
   // Un hito se celebra cuando ha terminado de caer la arena pendiente.
@@ -828,6 +858,10 @@ form.addEventListener('submit', (e) => {
 function celebrate(w: World, m: Milestone): void {
   milestoneTitle.textContent = m.title;
   milestoneDate.textContent = formatDayLong(grainDay(w.life, m.id));
+  // Reproduciendo, el aviso sale justo debajo del panel de reproducción en vez de detrás.
+  milestoneEl.classList.toggle('en-reproduccion', !!play);
+  // (La animación de entrada lo sube 12 px: se deja margen para que no roce el panel.)
+  milestoneEl.style.top = play ? `${Math.round(playPanel.getBoundingClientRect().bottom + 22)}px` : '';
   // Volver a mostrarlo reinicia la animación de entrada.
   milestoneEl.hidden = true;
   void milestoneEl.offsetWidth;
@@ -837,6 +871,12 @@ function celebrate(w: World, m: Milestone): void {
   sound.chime();
 }
 let milestoneTimer = 0;
+
+/** Quita el aviso de hito que haya en pantalla. */
+function hideMilestone(): void {
+  clearTimeout(milestoneTimer);
+  milestoneEl.hidden = true;
+}
 
 /** Posición de los tres próximos hitos, para que brillen (todos a la vez serían demasiados). */
 function milestoneMarks(w: World): Point[] {
@@ -855,7 +895,7 @@ function milestoneMarks(w: World): Point[] {
 function updateCountdown(): void {
   const w = world;
   let line = '';
-  if (w) {
+  if (w && !play) {
     line = countdownText(w.life, new Date()) ?? '';
     // Cada 8 s se alterna con el próximo hito.
     const next = nextMilestone(w.milestones, w.landed);
@@ -896,7 +936,7 @@ let ageCutoff = -1;
 
 function openAgePanel(): void {
   const w = world;
-  if (!w) return;
+  if (!w || play) return;
   const cur = w.cfg.retirementAge;
   ageInput.min = String(Math.max(40, Math.min(60, cur)));
   ageInput.max = String(Math.min(90, Math.max(70, cur)));
@@ -971,7 +1011,8 @@ let shareMessage = '';
 
 function openShare(): void {
   const w = world;
-  if (!w) return;
+  // Compartiría una fecha que no es la de hoy.
+  if (!w || play) return;
   hideTooltip();
   closeAgePanel();
   const info = {
@@ -1013,6 +1054,158 @@ shareCopy.addEventListener('click', () => {
 });
 shareClose.addEventListener('click', () => shareDialog.close());
 
+// ---------------------------------------------------------------- reproducir el paso del tiempo
+
+/** Velocidades: días de calendario por segundo y cómo se dicen. */
+const SPEEDS: ReadonlyArray<[number, string]> = [
+  [1, '1 día por segundo'],
+  [7, '1 semana por segundo'],
+  [30.44, '1 mes por segundo'],
+  [91.31, '3 meses por segundo'],
+  [365.25, '1 año por segundo'],
+  [1826, '5 años por segundo'],
+];
+let speedIdx = 2;
+
+interface Play {
+  /** Día reproducido (día civil, con decimales: la hora del día). */
+  day: number;
+  paused: boolean;
+  /** Ha llegado a la jubilación. */
+  done: boolean;
+  lastFrame: number;
+  /** Último hito celebrado durante la reproducción. */
+  celebrated: number;
+}
+/** Reproducción en curso, o null con el reloj en tiempo real. Nada de lo reproducido se guarda. */
+let play: Play | null = null;
+/** Espacio que se deja arriba para el panel de reproducción. */
+let topExtra = 0;
+let lastPlayDay = -1;
+
+function setTopExtra(px: number): void {
+  topExtra = px;
+  if (world) {
+    world.renderer.topExtra = px;
+    world.renderer.resize();
+  }
+}
+
+function openPlayPanel(): void {
+  playPanel.hidden = false;
+  playBtn.hidden = true;
+  lastPlayDay = -1;
+  // El reloj se encoge un poco para que el panel no tape la arena de arriba.
+  setTopExtra(Math.ceil(playPanel.getBoundingClientRect().bottom - 56 + 6));
+}
+
+function startPlay(fromStart: boolean): void {
+  const w = world;
+  if (!w) return;
+  hideTooltip();
+  hideLens();
+  closeAgePanel();
+  const now = performance.now();
+  if (play) hideMilestone();
+  play = { day: fromStart ? w.life.startDay : localDayNumber(), paused: false, done: false, lastFrame: now, celebrated: -1 };
+  openPlayPanel();
+  // Desde el principio: toda la arena arriba, como el primer día de tu vida laboral.
+  if (fromStart) createWorld(w.cfg, 0);
+  updatePlayControls();
+}
+
+function exitPlay(): void {
+  if (!play) return;
+  play = null;
+  // Los avisos de la reproducción no son reales: desaparecen con ella.
+  hideMilestone();
+  playPanel.hidden = true;
+  playBtn.hidden = false;
+  setTopExtra(0);
+  // Vuelve el reloj real, tal como estaba guardado.
+  const cfg = world?.cfg ?? loadConfig();
+  if (cfg) createWorld(cfg);
+}
+
+function togglePause(): void {
+  if (!play) return;
+  if (play.done) startPlay(true);
+  else play.paused = !play.paused;
+  updatePlayControls();
+}
+
+function updatePlayControls(): void {
+  const stopped = !play || play.paused || play.done;
+  playPause.classList.toggle('pausado', stopped);
+  const label = play?.done ? 'Otra vez desde el principio' : stopped ? 'Seguir' : 'Pausa';
+  playPause.setAttribute('aria-label', label);
+  playPause.title = label;
+  playSpeedLabel.textContent = SPEEDS[speedIdx][1];
+}
+
+/** Avanza el día reproducido y deja que caigan los granos de los días laborables que terminan. */
+function updatePlay(w: World, now: number): void {
+  if (!play) return;
+  // Si la pestaña estuvo sin fotogramas, no se saltan años de golpe.
+  const dt = Math.max(0, Math.min(100, now - play.lastFrame));
+  play.lastFrame = now;
+  if (!play.paused && !play.done) {
+    play.day += (dt / 1000) * SPEEDS[speedIdx][0];
+    if (play.day >= w.life.retireDay) {
+      play.day = w.life.retireDay;
+      play.done = true;
+      updatePlayControls();
+    }
+  }
+  const day = Math.floor(play.day);
+  // Las fechas de los granos («dentro de…», «hoy») se cuentan desde el día reproducido.
+  w.today = day;
+  w.target = fallenCount(w.life, day);
+  if (day !== lastPlayDay) {
+    lastPlayDay = day;
+    playDate.textContent = formatDayLong(day);
+  }
+  const status = play.done
+    ? '¡Jubilación! Con ▶ lo ves otra vez desde el principio.'
+    : play.paused
+      ? 'En pausa.'
+      : 'Nada de esto se guarda: con × vuelves a hoy.';
+  if (playStatus.textContent !== status) playStatus.textContent = status;
+}
+
+/** Durante la reproducción, cae enseguida cada grano cuyo día ha terminado. */
+function spawnPlayGrains(w: World, now: number): void {
+  const speed = SPEEDS[speedIdx][0];
+  const fallMs = reducedMotion ? 0 : speed <= 1 ? 1100 : speed <= 7 ? 800 : 520;
+  const bright = speed <= 7 ? 0.8 : 0;
+  let budget = 80;
+  while (w.nextDrop < w.target && budget-- > 0) {
+    const h = spawnHero(w, now, 0, fallMs, bright);
+    if (!h) break;
+    if (reducedMotion) {
+      w.heroes.pop();
+      landHero(w, h);
+    }
+  }
+}
+
+playBtn.addEventListener('click', () => startPlay(false));
+playStart.addEventListener('click', () => startPlay(true));
+playPause.addEventListener('click', togglePause);
+playClose.addEventListener('click', exitPlay);
+playSpeed.addEventListener('input', () => {
+  speedIdx = Number(playSpeed.value);
+  updatePlayControls();
+});
+document.addEventListener('keydown', (e) => {
+  if (!play || dialog.open || shareDialog.open) return;
+  const target = e.target as HTMLElement;
+  if (e.key === ' ' && (target === document.body || target === canvas)) {
+    e.preventDefault();
+    togglePause();
+  } else if (e.key === 'Escape') exitPlay();
+});
+
 // ---------------------------------------------------------------- bucle
 
 const showFps = new URLSearchParams(location.search).has('fps');
@@ -1037,6 +1230,9 @@ function tick(now: number): void {
 
   const w = world;
   if (!w) return;
+  updatePlay(w, now);
+  // Un aviso de la reproducción nunca sobrevive a ella.
+  if (!play && !milestoneEl.hidden && milestoneEl.classList.contains('en-reproduccion')) hideMilestone();
   updateDrops(w, now);
   updateTilt(w, now);
   keepTodayAtNeck(w);
@@ -1104,6 +1300,7 @@ function tick(now: number): void {
 // ---------------------------------------------------------------- arranque
 
 window.addEventListener('resize', () => {
+  if (play) openPlayPanel();
   world?.renderer.resize();
   hideTooltip();
 });
@@ -1137,6 +1334,9 @@ if (import.meta.env.DEV) {
     world: () => world,
     tick,
     setLayers,
+    startPlay,
+    exitPlay,
+    play: () => play,
     startSort,
     tiltTo: (deg: number) => {
       if (!world) return;

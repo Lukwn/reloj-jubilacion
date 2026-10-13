@@ -57,6 +57,10 @@
     </div>
 
     <footer class="contador">
+      <div class="fila-contador">
+      <button id="btn-play" class="play-btn" type="button" aria-label="Reproducir el paso del tiempo" title="Reproducir el paso del tiempo">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/></svg>
+      </button>
       <button id="btn-edad" class="contador-btn" type="button" title="¿Y si me jubilo a otra edad?" aria-controls="panel-edad" aria-expanded="false">
         <span id="contador" aria-live="polite"></span>
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -65,11 +69,35 @@
           <circle cx="9" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
         </svg>
       </button>
+      </div>
       <div class="linea2">
         <p id="pista" class="pista">Cada grano es un día laborable · toca uno para ver su día · arrastra o agita para remover la arena</p>
         <p id="cuenta" class="cuenta"></p>
       </div>
     </footer>
+
+    <section id="panel-play" class="panel-play" aria-label="Reproducir el paso del tiempo" hidden>
+      <div class="play-fila">
+        <p id="play-fecha" class="play-fecha" aria-live="off"></p>
+        <button id="btn-play-cerrar" class="cerrar" type="button" aria-label="Volver a hoy" title="Volver a hoy">×</button>
+      </div>
+      <div class="play-fila">
+        <div class="play-botones">
+          <button id="btn-play-inicio" class="icono" type="button" aria-label="Desde el principio" title="Desde el principio de tu vida laboral">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6 5h2v14H6zm3.5 7L18 5.5v13z"/></svg>
+          </button>
+          <button id="btn-play-pausa" class="icono primario-icono" type="button" aria-label="Pausa" title="Pausa">
+            <svg class="i-pausa" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M7 5h3.5v14H7zm6.5 0H17v14h-3.5z"/></svg>
+            <svg class="i-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/></svg>
+          </button>
+        </div>
+        <label class="play-velocidad">
+          <span id="play-vel">1 mes por segundo</span>
+          <input id="play-velocidad" type="range" min="0" max="5" step="1" value="2" />
+        </label>
+      </div>
+      <p id="play-estado" class="play-estado"></p>
+    </section>
 
     <section id="panel-edad" class="panel-edad" aria-label="¿Y si me jubilo a otra edad?" hidden>
       <div class="panel-cab">
