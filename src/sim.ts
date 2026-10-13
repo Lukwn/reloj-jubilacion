@@ -382,9 +382,9 @@ export class SandSim {
   }
 
   /**
-   * Empieza a ordenar los granos por fecha dentro de cada bulbo, sin cambiar la forma de la
-   * arena: el más antiguo de cada bulbo, abajo (arriba, junto al cuello) y desde el centro,
-   * igual que al empaquetar. Se avanza con `sortStep`.
+   * Empieza a ordenar y nivelar la arena de cada bulbo: cada grano acabará donde lo pondría
+   * `pack`, con la superficie plana y el más antiguo de cada bulbo abajo (arriba, junto al
+   * cuello) y desde el centro. Se avanza con `sortStep`.
    */
   startSort(): void {
     const { W, H, topEnd, bottomStart, centerOrder } = this.hg;
@@ -396,18 +396,17 @@ export class SandSim {
       [0, topEnd],
       [bottomStart, H],
     ]) {
-      const cells: number[] = [];
       const ids: number[] = [];
-      for (let y = y1 - 1; y >= y0; y--) {
-        for (let i = 0; i < W; i++) {
+      for (let i = y0 * W; i < y1 * W; i++) if (g[i] > 0) ids.push(g[i] - 1);
+      ids.sort((a, b) => a - b);
+      // Las celdas que ocuparía la arena recién empaquetada, de abajo arriba.
+      const cells: number[] = [];
+      for (let y = y1 - 1; y >= y0 && cells.length < ids.length; y--) {
+        for (let i = 0; i < W && cells.length < ids.length; i++) {
           const idx = y * W + centerOrder[i];
-          if (g[idx] > 0) {
-            cells.push(idx);
-            ids.push(g[idx] - 1);
-          }
+          if (g[idx] !== WALL) cells.push(idx);
         }
       }
-      ids.sort((a, b) => a - b);
       this.sortCells.push(Int32Array.from(cells));
       this.sortIds.push(Int32Array.from(ids));
       this.sortAt.push(0);
@@ -415,8 +414,9 @@ export class SandSim {
   }
 
   /**
-   * Coloca en su sitio una fracción de los granos de cada bulbo (de abajo arriba), intercambiándolos.
-   * Solo cambia qué grano ocupa cada celda, nunca dónde hay arena. Devuelve si queda trabajo.
+   * Coloca en su sitio una fracción de los granos de cada bulbo, de abajo arriba: si la celda
+   * está ocupada por otro grano, se intercambian; si está vacía, el grano se mueve a ella y deja
+   * un hueco donde estaba, que la arena de encima rellena al caer. Devuelve si queda trabajo.
    */
   sortStep(fraction: number): boolean {
     const g = this.grid;
@@ -430,11 +430,14 @@ export class SandSim {
         const cell = cells[i];
         const id = ids[i];
         const from = this.pos[id];
-        // Si la arena se ha movido mientras tanto (o el grano está cayendo), se salta.
-        if (from < 0 || from === cell || g[cell] <= 0) continue;
-        // Un grano que ha cruzado el cuello mientras tanto ya no es de este bulbo.
-        if (top !== from < split) continue;
-        this.swapCells(cell, from);
+        // Un grano que está cayendo por el cuello, o que ya lo ha cruzado, no es de este bulbo.
+        if (from < 0 || from === cell || top !== from < split) continue;
+        if (g[cell] > 0) this.swapCells(cell, from);
+        else if (g[cell] === EMPTY) {
+          g[from] = EMPTY;
+          this.put(id, cell);
+          this.wakeAround(from);
+        }
       }
       this.sortAt[b] = end;
     }

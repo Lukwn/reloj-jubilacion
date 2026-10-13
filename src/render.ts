@@ -22,8 +22,12 @@ export interface DrawFrame {
   cutoff: number;
   /** Granos que marcan un hito: brillan un poco. */
   marks: Point[];
-  /** Dedo o ratón removiendo la arena (radio en celdas). */
+  /** Dedo removiendo la arena (radio en celdas). */
   finger: (Point & { r: number }) | null;
+  /** Giro del reloj en pantalla, en radianes y en sentido horario (inclinarlo con el ratón). */
+  rotation?: number;
+  /** Lupa: posición del ratón en CSS y grano que se recuadra (celda en la rejilla). */
+  lens?: { x: number; y: number; grain: Point | null } | null;
 }
 
 interface Theme {
@@ -33,7 +37,11 @@ interface Theme {
   cap: string;
   capEdge: string;
   glow: string;
+  bg: string;
 }
+
+/** Radio de la lupa en píxeles CSS. */
+export const LENS_RADIUS = 64;
 
 const TOP_RESERVE = 56;
 const BOTTOM_RESERVE = 76;
@@ -54,6 +62,9 @@ export class Renderer {
   private glass = new Path2D();
   private theme!: Theme;
   private dim: Uint32Array | null = null;
+  /** Giro y escala con los que se dibujó el último fotograma, para deshacerlos al tocar. */
+  private rot = 0;
+  private rotScale = 1;
   private groupOf: Uint16Array | null = null;
 
   constructor(
@@ -90,6 +101,7 @@ export class Renderer {
       cap: v('--cap'),
       capEdge: v('--cap-edge'),
       glow: v('--glow'),
+      bg: v('--bg-2'),
     };
   }
 
@@ -123,9 +135,25 @@ export class Renderer {
     return p;
   }
 
-  /** Coordenadas CSS del puntero → coordenadas de rejilla. */
+  /** Centro del reloj en píxeles de dispositivo: el eje sobre el que gira. */
+  private center(): Point {
+    return { x: this.ox + (this.hg.W / 2) * this.s, y: this.oy + (this.hg.H / 2) * this.s };
+  }
+
+  /** Coordenadas CSS del puntero → coordenadas de rejilla (deshaciendo el giro, si lo hay). */
   toGrid(cssX: number, cssY: number): Point {
-    return { x: (cssX * this.dpr - this.ox) / this.s, y: (cssY * this.dpr - this.oy) / this.s };
+    let px = cssX * this.dpr;
+    let py = cssY * this.dpr;
+    if (this.rot !== 0) {
+      const c = this.center();
+      const dx = (px - c.x) / this.rotScale;
+      const dy = (py - c.y) / this.rotScale;
+      const cos = Math.cos(-this.rot);
+      const sin = Math.sin(-this.rot);
+      px = c.x + dx * cos - dy * sin;
+      py = c.y + dx * sin + dy * cos;
+    }
+    return { x: (px - this.ox) / this.s, y: (py - this.oy) / this.s };
   }
 
   /** Coordenadas de rejilla → coordenadas CSS. */
@@ -176,6 +204,25 @@ export class Renderer {
     this.offCtx.putImageData(this.img, 0, 0);
 
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Reloj girado: alrededor de su centro y, si hace falta, más pequeño para que quepa.
+    this.rot = f.rotation ?? 0;
+    this.rotScale = 1;
+    ctx.save();
+    if (this.rot !== 0) {
+      const c = this.center();
+      const w = W * s;
+      const h = H * s + 2 * CAP_CSS * dpr;
+      const cos = Math.abs(Math.cos(this.rot));
+      const sin = Math.abs(Math.sin(this.rot));
+      const availW = this.canvas.width - 32 * dpr;
+      const availH = this.canvas.height - (TOP_RESERVE + BOTTOM_RESERVE) * dpr;
+      this.rotScale = Math.min(1, availW / (w * cos + h * sin), availH / (w * sin + h * cos));
+      ctx.translate(c.x, c.y);
+      ctx.rotate(this.rot);
+      ctx.scale(this.rotScale, this.rotScale);
+      ctx.translate(-c.x, -c.y);
+    }
 
     // Vidrio (fondo)
     ctx.fillStyle = theme.glassFill;
@@ -265,6 +312,55 @@ export class Renderer {
       ctx.arc(px, py, Math.max(6 * dpr, s * 2.2), 0, Math.PI * 2);
       ctx.stroke();
     }
+    ctx.restore();
+
+    if (f.lens && this.rot === 0) this.drawLens(f.lens);
+  }
+
+  /**
+   * Lupa redonda centrada en el ratón: el reloj ampliado (vidrio incluido) para que cada grano
+   * mida unos 10 px, con el grano señalado recuadrado.
+   */
+  private drawLens(l: NonNullable<DrawFrame['lens']>): void {
+    const { ctx, dpr, s, theme, hg } = this;
+    const cx = l.x * dpr;
+    const cy = l.y * dpr;
+    const r = LENS_RADIUS * dpr;
+    const zoom = Math.max(10 * dpr, s * 3) / s;
+    const ring = new Path2D();
+    ring.arc(cx, cy, r, 0, Math.PI * 2);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    ctx.shadowBlur = 18 * dpr;
+    ctx.fillStyle = theme.bg;
+    ctx.fill(ring);
+    ctx.restore();
+
+    ctx.save();
+    ctx.clip(ring);
+    // Lo que hay bajo el ratón, en píxeles de pantalla, pasa a ocupar el centro de la lupa.
+    ctx.translate(cx, cy);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-cx, -cy);
+    ctx.fillStyle = theme.glassFill;
+    ctx.fill(this.glass);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
+    ctx.lineWidth = (1.5 * dpr) / zoom;
+    ctx.strokeStyle = theme.glassEdge;
+    ctx.stroke(this.glass);
+    if (l.grain) {
+      const m = 0.25 * s;
+      ctx.lineWidth = (2 * dpr) / zoom;
+      ctx.strokeStyle = theme.glow;
+      ctx.strokeRect(this.ox + (l.grain.x - 0.5) * s - m, this.oy + (l.grain.y - 0.5) * s - m, s + 2 * m, s + 2 * m);
+    }
+    ctx.restore();
+
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeStyle = theme.glassEdge;
+    ctx.stroke(ring);
   }
 
   /**

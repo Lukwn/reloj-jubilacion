@@ -15,8 +15,8 @@ import {
 import { phraseFor } from './phrases';
 import { designHourglass, type Hourglass } from './hourglass';
 import { SandSim } from './sim';
-import { Renderer, type HeroDraw, type Point } from './render';
-import { MouseShakeDetector, motionImpulse, type ShakeImpulse } from './shake';
+import { LENS_RADIUS, Renderer, type HeroDraw, type Point } from './render';
+import { motionImpulse, type ShakeImpulse } from './shake';
 import { dimColors, grainColors, unpackColor, yearLayers, type YearLayers } from './colors';
 import {
   loadConfig,
@@ -43,7 +43,8 @@ const tooltipEl = $('tooltip');
 const tooltipDate = $('tooltip-fecha');
 const tooltipPhrase = $('tooltip-frase');
 const tooltipYear = $('tooltip-anio');
-const yearLabel = $('etiqueta-anio');
+const tooltipWhen = $('tooltip-cuando');
+const lensLabel = $('etiqueta-lupa');
 const layersBtn = $<HTMLButtonElement>('btn-capas');
 const sortBtn = $<HTMLButtonElement>('btn-ordenar');
 const tooltipMilestone = $('tooltip-hito');
@@ -331,7 +332,6 @@ function applyShake(imp: ShakeImpulse): void {
   }
 }
 
-const mouseShake = new MouseShakeDetector();
 
 const motionPrev = { x: 0, y: 0, z: 0 };
 window.addEventListener('devicemotion', (e) => {
@@ -406,7 +406,9 @@ function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number
     const p = heroPoint(w, h, now);
     if (Math.hypot(p.x - g.x, p.y - g.y) <= reach * 1.5) return h.id;
   }
-  for (const m of w.milestones) {
+  // Con el dedo, los hitos que brillan son más fáciles de tocar. Con el ratón (y la lupa)
+  // manda el grano que hay justo debajo.
+  for (const m of touch ? w.milestones : []) {
     if (m.id < w.landed || sim.pos[m.id] < 0) continue;
     const p = cellPoint(w, sim.pos[m.id]);
     if (Math.hypot(p.x - g.x, p.y - g.y) <= reach * 2) return m.id;
@@ -435,7 +437,8 @@ function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number
 function showTooltip(w: World, id: number, cssX: number, cssY: number): void {
   const day = grainDay(w.life, id);
   const date = formatDayLong(day);
-  tooltipDate.textContent = day === w.today ? `Hoy · ${date}` : date;
+  tooltipDate.textContent = date;
+  tooltipWhen.textContent = whenText(w, id);
   tooltipPhrase.textContent = phraseFor(day, {
     today: w.today,
     birthDay: w.life.birthDay,
@@ -476,28 +479,67 @@ function applyPalette(w: World): void {
 
 const plural = (n: number, one: string, many: string) => `${formatInt(n)} ${n === 1 ? one : many}`;
 
-/** «2031 · 251 días laborables por delante», o los trabajados, o los que quedan del año en curso. */
+/** Los días laborables que tiene un año: «Año 2040: 252 días laborables», o cuántos quedan del año en curso. */
 function yearSummary(w: World, year: number): string {
   const total = w.layers.counts.get(year) ?? 0;
   const first = w.layers.first.get(year) ?? 0;
   const ahead = Math.max(0, Math.min(total, first + total - Math.max(first, w.landed)));
-  if (ahead === 0) return `${year} · ${plural(total, 'día laborable trabajado', 'días laborables trabajados')}`;
-  if (ahead === total) return `${year} · ${plural(total, 'día laborable por delante', 'días laborables por delante')}`;
-  return `${year} · quedan ${formatInt(ahead)} de ${plural(total, 'día laborable', 'días laborables')}`;
+  const days = plural(total, 'día laborable', 'días laborables');
+  if (ahead === 0) return `Año ${year}: ${days}, ya trabajados`;
+  if (ahead === total) return `Año ${year}: ${days}`;
+  return `Año ${year}: quedan ${formatInt(ahead)} de sus ${days}`;
 }
 
-function showYearLabel(w: World, year: number, cssX: number, cssY: number): void {
-  yearLabel.textContent = yearSummary(w, year);
-  yearLabel.hidden = false;
-  const rect = yearLabel.getBoundingClientRect();
-  let left = cssX + 16;
-  if (left + rect.width > window.innerWidth - 8) left = cssX - rect.width - 16;
-  yearLabel.style.left = `${Math.max(8, left)}px`;
-  yearLabel.style.top = `${Math.max(8, cssY - rect.height - 10)}px`;
+/** Cuánto falta para el día de un grano, o cuánto hace, contado en días laborables desde hoy. */
+function whenText(w: World, id: number): string {
+  const day = grainDay(w.life, id);
+  if (day === w.today) return 'Hoy';
+  // w.target es el primer grano de hoy en adelante: hoy si es laborable, si no el siguiente.
+  if (id >= w.target) {
+    const n = id - w.target + (w.life.isWorkday(w.today) ? 0 : 1);
+    return n === 1 ? 'El próximo día laborable' : `Dentro de ${formatInt(n)} días laborables`;
+  }
+  const n = w.target - id;
+  return n === 1 ? 'El último día laborable' : `Hace ${formatInt(n)} días laborables`;
 }
 
-function hideYearLabel(): void {
-  yearLabel.hidden = true;
+// ---------------------------------------------------------------- lupa
+
+/** Lupa al pasar el ratón: posición (CSS) y grano señalado, o null. */
+let lens: { x: number; y: number; id: number } | null = null;
+/** Tras un clic la lupa se aparta, para leer la frase, hasta que el ratón se aleja un poco. */
+let lensAway: { x: number; y: number } | null = null;
+
+function showLens(w: World, id: number, cssX: number, cssY: number): void {
+  lens = { x: cssX, y: cssY, id };
+  hoverYear = layersOn && id >= 0 ? w.layers.yearOf[id] : -1;
+  if (id < 0) {
+    lensLabel.hidden = true;
+    return;
+  }
+  const date = document.createElement('strong');
+  date.textContent = formatDayLong(grainDay(w.life, id));
+  const when = document.createElement('span');
+  when.className = 'cuando';
+  when.textContent = whenText(w, id);
+  lensLabel.replaceChildren(date, when);
+  if (layersOn) {
+    const year = document.createElement('span');
+    year.textContent = yearSummary(w, w.layers.yearOf[id]);
+    lensLabel.append(year);
+  }
+  lensLabel.hidden = false;
+  const rect = lensLabel.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, cssX - rect.width / 2));
+  let top = cssY + LENS_RADIUS + 10;
+  if (top + rect.height > window.innerHeight - 8) top = cssY - LENS_RADIUS - 10 - rect.height;
+  lensLabel.style.left = `${left}px`;
+  lensLabel.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideLens(): void {
+  lens = null;
+  lensLabel.hidden = true;
   hoverYear = -1;
 }
 
@@ -515,7 +557,7 @@ function setLayers(on: boolean): void {
   layersBtn.setAttribute('aria-pressed', String(on));
   sortBtn.hidden = !on;
   hideTooltip();
-  hideYearLabel();
+  hideLens();
   if (world) applyPalette(world);
   if (on) showHint('Cada color es un año · pasa por encima o toca la arena para ver cuál');
 }
@@ -551,6 +593,8 @@ interface Press {
   last: Point;
   dragging: boolean;
   touch: boolean;
+  /** Giro del reloj al empezar a arrastrar con el ratón. */
+  angle0: number;
 }
 
 /** Distancia en px a partir de la cual un toque pasa a ser un arrastre. */
@@ -584,6 +628,7 @@ canvas.addEventListener('pointerdown', (e) => {
     last: w.renderer.toGrid(e.clientX, e.clientY),
     dragging: false,
     touch: e.pointerType !== 'mouse',
+    angle0: viewAngle,
   };
   try {
     canvas.setPointerCapture(e.pointerId);
@@ -600,8 +645,17 @@ canvas.addEventListener('pointermove', (e) => {
       if (Math.hypot(e.clientX - press.x0, e.clientY - press.y0) < DRAG_START_PX) return;
       press.dragging = true;
       hideTooltip();
-      hideYearLabel();
+      hideLens();
       canvas.classList.add('removiendo');
+      if (!press.touch) {
+        tilting = true;
+        spinStart = -1;
+      }
+    }
+    if (!press.touch) {
+      // Con el ratón se coge el reloj y se inclina: medio grado por píxel, hasta 150°.
+      tiltTarget = Math.max(-2.6, Math.min(2.6, press.angle0 + (e.clientX - press.x0) * (Math.PI / 360)));
+      return;
     }
     const p = w.renderer.toGrid(e.clientX, e.clientY);
     const r = fingerRadius(w, press.touch);
@@ -611,20 +665,23 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (e.pointerType !== 'mouse') return;
-  const b = w.renderer.bounds();
-  const inside = e.clientX >= b.left - 40 && e.clientX <= b.right + 40 && e.clientY >= b.top && e.clientY <= b.bottom;
-  if (inside) {
-    const imp = mouseShake.onMove(e.clientX, e.clientY, e.timeStamp);
-    if (imp) applyShake(imp);
-  }
-  if (!layersOn) return;
-  const id = inside ? pickGrain(w, e.clientX, e.clientY, false) : -1;
-  if (id < 0) {
-    hideYearLabel();
+  // Con el reloj girado, la lupa estorbaría.
+  if (viewAngle !== 0 || spinStart >= 0) {
+    hideLens();
     return;
   }
-  hoverYear = w.layers.yearOf[id];
-  showYearLabel(w, hoverYear, e.clientX, e.clientY);
+  if (lensAway) {
+    if (Math.hypot(e.clientX - lensAway.x, e.clientY - lensAway.y) < 24) return;
+    lensAway = null;
+    hideTooltip();
+  }
+  const b = w.renderer.bounds();
+  const inside = e.clientX >= b.left - 20 && e.clientX <= b.right + 20 && e.clientY >= b.top && e.clientY <= b.bottom;
+  if (!inside) {
+    hideLens();
+    return;
+  }
+  showLens(w, pickGrain(w, e.clientX, e.clientY, false), e.clientX, e.clientY);
 });
 
 function endPress(e: PointerEvent, tap: boolean): void {
@@ -632,6 +689,7 @@ function endPress(e: PointerEvent, tap: boolean): void {
   const p = press;
   press = null;
   finger = null;
+  tilting = false;
   canvas.classList.remove('removiendo');
   const w = world;
   if (!w || !tap || p.dragging) return;
@@ -642,13 +700,58 @@ function endPress(e: PointerEvent, tap: boolean): void {
     return;
   }
   selectedId = id;
+  if (!p.touch) {
+    hideLens();
+    lensAway = { x: p.x0, y: p.y0 };
+  }
   showTooltip(w, id, p.x0, p.y0);
 }
 
 canvas.addEventListener('pointerup', (e) => endPress(e, true));
+// Doble clic: una vuelta completa al reloj. La arena da tumbos, pero el cuello sigue cerrado.
+canvas.addEventListener('dblclick', () => {
+  if (!world || reducedMotion) return;
+  hideTooltip();
+  tilting = false;
+  spinStart = performance.now();
+});
+
+// ---------------------------------------------------------------- inclinar con el ratón
+
+/** Giro del reloj en pantalla (rad, sentido horario). La gravedad de la arena lo sigue. */
+let viewAngle = 0;
+let tiltTarget = 0;
+let tilting = false;
+/** Inicio de la vuelta completa del doble clic, o -1. */
+let spinStart = -1;
+const SPIN_MS = 1800;
+let lastTiltWake = 0;
+
+function updateTilt(w: World, now: number): void {
+  if (spinStart >= 0) {
+    const p = Math.min(1, (now - spinStart) / SPIN_MS);
+    const ease = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+    viewAngle = ease * 2 * Math.PI;
+    if (p >= 1) {
+      spinStart = -1;
+      viewAngle = 0;
+    }
+  } else if (tilting) {
+    viewAngle += (tiltTarget - viewAngle) * 0.25;
+  } else if (viewAngle !== 0) {
+    // Al soltarlo, vuelve despacio a su sitio.
+    viewAngle = reducedMotion || Math.abs(viewAngle) < 0.002 ? 0 : viewAngle * 0.92;
+  } else return;
+  const moved = Math.abs(angleDelta(w.sim.gravityAngle, viewAngle));
+  w.sim.gravityAngle = viewAngle;
+  if (moved > 0.02 && now - lastTiltWake > 120) {
+    w.sim.wakeAll();
+    lastTiltWake = now;
+  }
+}
 canvas.addEventListener('pointercancel', (e) => endPress(e, false));
 canvas.addEventListener('pointerleave', () => {
-  if (!press) hideYearLabel();
+  if (!press) hideLens();
 });
 
 // ---------------------------------------------------------------- contador
@@ -935,6 +1038,7 @@ function tick(now: number): void {
   const w = world;
   if (!w) return;
   updateDrops(w, now);
+  updateTilt(w, now);
   keepTodayAtNeck(w);
 
   const sim = w.sim;
@@ -976,6 +1080,13 @@ function tick(now: number): void {
     else if (selectedId >= 0) highlight = w.layers.yearOf[selectedId];
   }
 
+  let lensFrame = null;
+  if (lens) {
+    const at = lens.id >= 0 ? w.sim.pos[lens.id] : -1;
+    lensFrame = { x: lens.x, y: lens.y, grain: at >= 0 ? cellPoint(w, at) : null };
+  }
+  canvas.classList.toggle('con-lupa', !!lens);
+
   w.renderer.draw({
     time: now,
     heroes,
@@ -985,6 +1096,8 @@ function tick(now: number): void {
     finger,
     cutoff: ageCutoff,
     marks: milestoneMarks(w),
+    rotation: viewAngle,
+    lens: lensFrame,
   });
 }
 
@@ -1006,6 +1119,9 @@ document.addEventListener('visibilitychange', () => {
 window.setInterval(checkDay, 60_000);
 window.setInterval(updateCountdown, 1000);
 window.addEventListener('pagehide', () => world && persistProgress(world));
+if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
+  hintEl.textContent = 'Cada grano es un día laborable · pasa el ratón por la arena para verla con lupa · arrastra para inclinar el reloj · doble clic para darle la vuelta';
+}
 window.setTimeout(() => hintEl.classList.add('oculta'), 10_000);
 
 const initial = loadConfig();

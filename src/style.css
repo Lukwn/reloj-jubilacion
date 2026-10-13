@@ -23,6 +23,10 @@ html, body {
   user-select: none;
   cursor: pointer;
 }
+@media (hover: hover) and (pointer: fine) {
+  #reloj { cursor: grab; }
+}
+#reloj.con-lupa { cursor: none; }
 #reloj.removiendo { cursor: grabbing; }
 
 .barra {
@@ -173,6 +177,8 @@ html, body {
   font-size: 14px;
 }
 .tooltip strong { display: block; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.tooltip-cuando { display: block; margin: -1px 0 4px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.etiqueta .cuando { color: var(--fg); }
 .tooltip-anio {
   display: block;
   margin-top: 6px;
@@ -247,8 +253,9 @@ dialog.compartir { width: min(420px, calc(100vw - 32px)); }
 .compartir h2 { margin: 0 0 12px; font-size: 18px; }
 .compartir img { display: block; width: 100%; max-height: 52vh; object-fit: contain; border-radius: 10px; margin-bottom: 10px; }
 
-.etiqueta { padding: 6px 10px; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.etiqueta b { color: var(--accent); }
+.etiqueta { padding: 6px 10px; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: center; }
+.etiqueta strong { display: block; color: var(--accent); font-weight: 600; }
+.etiqueta span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
 
 dialog {
   width: min(380px, calc(100vw - 32px));

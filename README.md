@@ -19,10 +19,12 @@ Abre http://localhost:5173. La primera vez te pedirá la fecha de nacimiento, la
 ## Cómo se usa
 
 - **Clic o toque en un grano**: muestra su fecha y una frase.
-- **Arrastrar el dedo o el ratón por la arena**: la remueve. En la superficie abre un surco; dentro de la arena compacta, los granos de delante del dedo pasan detrás y se mezclan a lo largo del trazo.
-- **Agitar el ratón rápido sobre el reloj** (o el móvil): la arena se remueve dentro de cada bulbo. El cuello sigue cerrado.
+- **Lupa** (con ratón): al pasar por la arena, una lupa la amplía, recuadra el grano señalado y muestra su fecha (y el resumen del año con las capas activadas). Tras un clic se aparta hasta que el ratón se aleja.
+- **Con ratón, pulsar y arrastrar a un lado**: inclina el reloj entero (se dibuja girado y la gravedad de la arena lo sigue). Al soltarlo vuelve a su sitio. **Doble clic**: una vuelta completa.
+- **Con el dedo, arrastrar por la arena**: la remueve. En la superficie abre un surco; dentro de la arena compacta, los granos de delante del dedo pasan detrás y se mezclan a lo largo del trazo.
+- **Agitar el móvil**: la arena se remueve dentro de cada bulbo. El cuello sigue cerrado.
 - **Inclinar el móvil**: la gravedad de la arena sigue la orientación del móvil (`deviceorientation`, beta y gamma). La inclinación se exagera un poco porque en la rejilla la arena no resbala hasta los 45°. Boca abajo, la arena cae al otro extremo de cada bulbo; el cuello sigue cerrado.
-- **Botón de capas**: tiñe la arena por años. Al pasar el ratón (o tocar un grano) se resalta ese año y se ve cuántos días laborables tiene. Con **Ordenar capas** los granos vuelven a su sitio por fecha (solo se intercambian identidades; la forma de la arena no cambia).
+- **Botón de capas**: tiñe la arena por años. Al pasar el ratón (o tocar un grano) se resalta ese año y se ve cuántos días laborables tiene. Con **Ordenar capas** la arena se nivela y cada grano vuelve a su sitio por fecha, de abajo arriba: queda igual que recién empaquetada.
 - **Cuenta atrás**: debajo del contador, cuánto falta para que caiga el grano de hoy (o el próximo, si hoy no es laborable). Se alterna con el próximo hito.
 - **Hitos**: 10 %, 25 %, el ecuador, 75 %, 90 %, 1000/2500/5000… días trabajados, los últimos 1000/500/100/10 días y la jubilación. Los tres próximos brillan en la arena; al alcanzar uno sale un aviso. Los ya celebrados se guardan para no repetirlos.
 - **¿Y si me jubilo a otra edad?**: al tocar el contador se abre una barra de edad. Los granos que te ahorrarías se ven transparentes. Cambiar solo la edad no repite la caída de los días ya trabajados.

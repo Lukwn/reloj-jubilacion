@@ -176,36 +176,25 @@ describe('reloj de arena', () => {
     expect(sim.countRows(0, hg.topEnd)).toBe(8_000);
   });
 
-  it('ordenar deja cada bulbo por fecha, sin mover la arena de sitio', () => {
-    const { hg, sim } = setup(8_000, 2_000);
-    for (let f = 0; f < 200; f++) {
+  it('ordenar nivela la arena y deja cada bulbo por fecha, como recién empaquetada', () => {
+    const { sim } = setup(8_000, 2_000);
+    // Se remueve y se inclina para que la arena quede revuelta y con montículos.
+    sim.gravityAngle = 1.2;
+    for (let f = 0; f < 300; f++) {
       if (f < 100) {
         sim.agitation = 1;
         if (f % 15 === 0) sim.wakeAll();
       } else sim.agitation = 0;
       sim.step();
     }
-    const occupied = Array.from(sim.grid, (v) => v > 0);
+    sim.gravityAngle = 0;
     sim.startSort();
     let guard = 0;
-    while (sim.sortStep(0.05) && guard++ < 100);
+    // Mientras se ordena, la simulación sigue corriendo, como en la app.
+    while (sim.sortStep(0.05) && guard++ < 100) sim.step();
+    for (let f = 0; f < 200; f++) sim.step();
     expect(sim.sorting).toBe(false);
-    expect(Array.from(sim.grid, (v) => v > 0)).toEqual(occupied);
-    // De abajo arriba y desde el centro, los ids de cada bulbo van en orden creciente.
-    for (const [y0, y1] of [
-      [0, hg.topEnd],
-      [hg.bottomStart, hg.H],
-    ]) {
-      let prev = -1;
-      for (let y = y1 - 1; y >= y0; y--) {
-        for (let i = 0; i < hg.W; i++) {
-          const v = sim.grid[y * hg.W + hg.centerOrder[i]];
-          if (v <= 0) continue;
-          expect(v - 1).toBeGreaterThan(prev);
-          prev = v - 1;
-        }
-      }
-    }
-    expect(sim.countRows(0, hg.topEnd)).toBe(6_000);
+    const fresh = setup(8_000, 2_000).sim;
+    expect(Array.from(sim.grid)).toEqual(Array.from(fresh.grid));
   });
 });
