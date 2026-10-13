@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <title>Reloj de jubilación</title>
+    <title>Reloj de jubilación: cuántos días laborables te quedan para jubilarte</title>
+    <meta name="description" content="Un reloj de arena en el que cada grano es un día laborable: arriba los que te quedan hasta la jubilación, abajo los que ya trabajaste. Cada noche cae uno." />
+    <!--canonica-->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E⏳%3C/text%3E%3C/svg%3E" />
   </head>
   <body>
@@ -12,11 +14,23 @@
 
     <header class="barra">
       <h1>Reloj de jubilación</h1>
+      <div class="botones">
+      <details id="menu" class="menu">
+        <summary class="icono" aria-label="Más información" title="Más información">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M4 6.5h16v2H4zm0 4.5h16v2H4zm0 4.5h16v2H4z"/>
+          </svg>
+        </summary>
+        <nav aria-label="Páginas">
+        %MENU_PAGINAS%
+        </nav>
+      </details>
       <button id="btn-ajustes" class="icono" type="button" aria-label="Ajustes" title="Ajustes">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z" transform="translate(-1 0)"/>
         </svg>
       </button>
+      </div>
     </header>
 
     <footer class="contador">

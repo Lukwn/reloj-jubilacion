@@ -376,6 +376,15 @@ function openSettings(): void {
 }
 
 $('btn-ajustes').addEventListener('click', openSettings);
+
+// El menú de páginas se cierra al tocar fuera o con Escape.
+const menu = $('menu') as HTMLDetailsElement;
+document.addEventListener('pointerdown', (e) => {
+  if (menu.open && !menu.contains(e.target as Node)) menu.open = false;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') menu.open = false;
+});
 cancelBtn.addEventListener('click', () => dialog.close());
 dialog.addEventListener('cancel', (e) => {
   if (!world) e.preventDefault();

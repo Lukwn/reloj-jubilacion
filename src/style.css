@@ -1,38 +1,4 @@
-:root {
-  color-scheme: dark;
-  --bg: #0c0e13;
-  --bg-2: #171b26;
-  --fg: #ebe6db;
-  --muted: #9b968b;
-  --panel: rgba(22, 26, 36, 0.94);
-  --panel-edge: rgba(255, 255, 255, 0.08);
-  --accent: #e2b76c;
-  --glass-fill: rgba(190, 210, 255, 0.045);
-  --glass-edge: rgba(215, 228, 255, 0.42);
-  --glass-shine: rgba(255, 255, 255, 0.16);
-  --cap: #262b38;
-  --cap-edge: #3a4253;
-  --glow: rgba(255, 210, 130, 0.95);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f2eee6;
-    --bg-2: #fbf8f2;
-    --fg: #2b2620;
-    --muted: #6f685c;
-    --panel: rgba(255, 252, 246, 0.97);
-    --panel-edge: rgba(0, 0, 0, 0.1);
-    --accent: #9c6a17;
-    --glass-fill: rgba(255, 255, 255, 0.45);
-    --glass-edge: rgba(70, 80, 100, 0.45);
-    --glass-shine: rgba(255, 255, 255, 0.85);
-    --cap: #5c4b3b;
-    --cap-edge: #3e3226;
-    --glow: rgba(214, 140, 30, 0.9);
-  }
-}
+@import './tokens.css';
 
 * { box-sizing: border-box; }
 
@@ -90,6 +56,34 @@ html, body {
   cursor: pointer;
 }
 .icono:hover, .icono:focus-visible { color: var(--fg); }
+
+.botones { display: flex; gap: 8px; }
+
+.menu { position: relative; pointer-events: auto; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu[open] summary { color: var(--fg); border-color: var(--accent); }
+.menu nav {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.menu nav a {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 14px;
+  text-decoration: none;
+}
+.menu nav a:hover, .menu nav a:focus-visible { background: var(--bg-2); color: var(--accent); }
 
 .contador {
   position: fixed;

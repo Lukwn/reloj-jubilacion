@@ -33,4 +33,5 @@ Con `prefers-reduced-motion` no se puede agitar y las animaciones se reducen al 
 - `src/hourglass.ts`: geometría del reloj sobre una rejilla. Se dimensiona para que cada bulbo quepa todos los granos con un 12 % de holgura.
 - `src/sim.ts`: arena por autómata celular. Cada celda guarda el ID del grano (ID = número de día laborable desde el inicio). Solo se procesan los granos activos, y los demás duermen. El cuello son celdas sólidas: el grano del día lo atraviesa como animación, fuera de la rejilla.
 - `src/render.ts`: Canvas 2D. Se pinta la arena a un píxel por celda, se escala sin suavizado y encima va el vidrio.
+- Páginas de texto (guía de jubilación, días laborables, preguntas frecuentes, acerca de, privacidad y aviso legal): una carpeta por página con su `index.html`, estilos en `src/pages.css`. La cabecera, el pie, el menú y la URL canónica los inserta un plugin en `vite.config.ts`, donde también están la lista de páginas y los datos del titular. `public/` tiene `robots.txt` y `sitemap.xml`.
 - La configuración y el progreso se guardan en `localStorage`. Si no está disponible, la app funciona igual, solo que sin recordar nada.

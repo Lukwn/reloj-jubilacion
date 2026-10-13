@@ -1,0 +1,36 @@
+/* Colores compartidos por el reloj y las páginas de texto. */
+:root {
+  color-scheme: dark;
+  --bg: #0c0e13;
+  --bg-2: #171b26;
+  --fg: #ebe6db;
+  --muted: #9b968b;
+  --panel: rgba(22, 26, 36, 0.94);
+  --panel-edge: rgba(255, 255, 255, 0.08);
+  --accent: #e2b76c;
+  --glass-fill: rgba(190, 210, 255, 0.045);
+  --glass-edge: rgba(215, 228, 255, 0.42);
+  --glass-shine: rgba(255, 255, 255, 0.16);
+  --cap: #262b38;
+  --cap-edge: #3a4253;
+  --glow: rgba(255, 210, 130, 0.95);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f2eee6;
+    --bg-2: #fbf8f2;
+    --fg: #2b2620;
+    --muted: #6f685c;
+    --panel: rgba(255, 252, 246, 0.97);
+    --panel-edge: rgba(0, 0, 0, 0.1);
+    --accent: #9c6a17;
+    --glass-fill: rgba(255, 255, 255, 0.45);
+    --glass-edge: rgba(70, 80, 100, 0.45);
+    --glass-shine: rgba(255, 255, 255, 0.85);
+    --cap: #5c4b3b;
+    --cap-edge: #3e3226;
+    --glow: rgba(214, 140, 30, 0.9);
+  }
+}
