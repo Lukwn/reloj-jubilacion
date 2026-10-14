@@ -32,7 +32,8 @@ export const ASPECT = 0.6; // ancho / alto
 const MARGIN = 1.12; // holgura de capacidad sobre el total de granos
 
 function build(bulbRows: number): Hourglass {
-  const neckRows = Math.max(4, Math.round(bulbRows * 0.05));
+  // Con pocos granos (años, nóminas) cada celda es una canica grande: basta un cuello corto.
+  const neckRows = bulbRows < 40 ? 2 : Math.max(4, Math.round(bulbRows * 0.05));
   const H = bulbRows * 2 + neckRows;
   let W = Math.round(H * ASPECT);
   if (W % 2) W++;
@@ -70,8 +71,18 @@ export function isInterior(hg: Hourglass, x: number, y: number): boolean {
 /** El reloj más pequeño en el que cada bulbo puede contener todos los granos con holgura. */
 export function designHourglass(grains: number): Hourglass {
   const needed = Math.ceil(grains * MARGIN) + 20;
-  for (let rows = 20; ; rows++) {
-    const hg = build(rows);
-    if (hg.capacity >= needed) return hg;
+  // La capacidad crece con las filas: se dobla hasta pasarse y luego se busca por bisección
+  // (con decenas de miles de granos, probar fila a fila tardaría).
+  let lo = 8;
+  let hi = 8;
+  while (build(hi).capacity < needed) {
+    lo = hi;
+    hi *= 2;
   }
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (build(mid).capacity >= needed) hi = mid;
+    else lo = mid + 1;
+  }
+  return build(hi);
 }

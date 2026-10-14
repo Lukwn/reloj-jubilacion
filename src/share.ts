@@ -1,4 +1,4 @@
-// Imagen para compartir: el reloj tal como está, con los días que quedan y el porcentaje.
+// Imagen para compartir: el reloj tal como está, con lo que queda (en su unidad) y el porcentaje.
 // No incluye la fecha de nacimiento ni ningún otro dato personal.
 
 export const SHARE_URL = 'https://relojdejubilacion.com';
@@ -6,6 +6,8 @@ export const SHARE_URL = 'https://relojdejubilacion.com';
 export interface ShareInfo {
   /** «7717» ya formateado. */
   remaining: string;
+  /** «días laborables», «nóminas», «segundos de trabajo»… */
+  what: string;
   /** «31,6 %» ya formateado. */
   percent: string;
   /** 0..1 */
@@ -49,12 +51,15 @@ export function drawCard(clock: HTMLCanvasElement, info: ShareInfo): HTMLCanvasE
   g.drawImage(clock, (CARD_W - clock.width) / 2, 100);
 
   g.fillStyle = accent;
-  g.font = font(700, 128);
+  // Los segundos son un número muy largo: se reduce la letra hasta que quepa.
+  let size = 128;
+  g.font = font(700, size);
+  while (size > 60 && g.measureText(info.remaining).width > CARD_W - 120) g.font = font(700, (size -= 4));
   g.fillText(info.remaining, CARD_W / 2, 1118);
 
   g.fillStyle = fg;
   g.font = font(500, 42);
-  g.fillText('días laborables para jubilarme', CARD_W / 2, 1176);
+  g.fillText(`${info.what} para jubilarme`, CARD_W / 2, 1176);
 
   const barW = 720;
   const barX = (CARD_W - barW) / 2;
@@ -78,7 +83,7 @@ export function drawCard(clock: HTMLCanvasElement, info: ShareInfo): HTMLCanvasE
 export const CLOCK_SIZE = { width: CARD_W, height: 960 };
 
 export function shareText(info: ShareInfo): string {
-  return `Me quedan ${info.remaining} días laborables para jubilarme ⏳ ¿Y a ti?`;
+  return `Me quedan ${info.remaining} ${info.what} para jubilarme ⏳ ¿Y a ti?`;
 }
 
 /**

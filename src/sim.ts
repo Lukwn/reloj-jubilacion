@@ -26,6 +26,11 @@ export class SandSim {
    */
   gravityAngle = 0;
 
+  /** Dirección efectiva de la gravedad: la del reloj más el ladeo de la agitación. */
+  get fallAngle(): number {
+    return this.gravityAngle + this.tilt * 0.6;
+  }
+
   /** La gravedad apunta más hacia arriba que hacia abajo: el reloj está boca abajo. */
   get gravityUp(): boolean {
     return Math.cos(this.gravityAngle) < 0;
@@ -183,14 +188,23 @@ export class SandSim {
     // Las 8 direcciones de la rejilla, en orden de ángulo: 0 abajo, 2 derecha, 4 arriba, 6 izquierda.
     const dirs = this.dirs;
     // Gravedad entre dos direcciones: cada grano cae por una u otra según lo cerca que esté.
-    const angle = this.gravityAngle + this.tilt * 0.6;
+    const angle = this.fallAngle;
     let u = (angle / (Math.PI / 4)) % 8;
     if (u < 0) u += 8;
     const k0 = Math.floor(u);
     const frac = u - k0;
 
-    for (let i = 0; i < n; i++) {
-      const id = list[i];
+    // Orden aleatorio: cuando varios granos pueden caer al mismo hueco gana el primero que se
+    // procesa. Con un orden fijo ganaría siempre el mismo lado y los huecos que deja cada grano
+    // al salir subirían ladeados, vaciando un lado del bulbo antes que el otro.
+    for (let j = n - 1; j > 0; j--) {
+      const r = Math.floor(this.rand() * (j + 1));
+      const t = list[j];
+      list[j] = list[r];
+      list[r] = t;
+    }
+    for (let j = 0; j < n; j++) {
+      const id = list[j];
       const idx = pos[id];
       if (idx < 0) continue;
       let target = -1;
@@ -450,12 +464,24 @@ export class SandSim {
     this.sortAt = [];
   }
 
-  /** Celda ocupada del bulbo superior más cercana al cuello. */
-  findNeckGrain(): number {
+  /**
+   * El ancho es par: centerOrder empareja columnas a la misma distancia del centro (izquierda y
+   * derecha). Se alterna cuál va primero en cada llamada para no vaciar ni llenar un lado antes.
+   */
+  private neckFlip = 0;
+  private landFlip = 0;
+
+  /**
+   * Celda ocupada del bulbo superior más cercana al cuello. Sin `side` alterna el lado del
+   * empate en cada llamada; con `side` (0 o 1) siempre elige el mismo, para quien la consulta
+   * en cada fotograma sin sacar el grano.
+   */
+  findNeckGrain(side?: 0 | 1): number {
     const { W, topEnd, centerOrder } = this.hg;
+    const f = side ?? (this.neckFlip ^= 1);
     for (let y = topEnd - 1; y >= 0; y--) {
       for (let i = 0; i < W; i++) {
-        const idx = y * W + centerOrder[i];
+        const idx = y * W + centerOrder[i ^ f];
         if (this.grid[idx] > 0) return idx;
       }
     }
@@ -463,9 +489,10 @@ export class SandSim {
   }
 
   /** Celda donde se posa un grano que sale del cuello: la cima de la columna central. */
-  findLandingCell(): number {
+  findLandingCell(side?: 0 | 1): number {
     const { W, H, bottomStart, centerOrder } = this.hg;
-    const x = centerOrder[0];
+    const f = side ?? (this.landFlip ^= 1);
+    const x = centerOrder[f];
     let y = bottomStart;
     if (this.grid[y * W + x] === EMPTY) {
       while (y + 1 < H && this.grid[(y + 1) * W + x] === EMPTY) y++;
@@ -473,7 +500,7 @@ export class SandSim {
     }
     for (let yy = bottomStart; yy < H; yy++) {
       for (let i = 0; i < W; i++) {
-        const idx = yy * W + centerOrder[i];
+        const idx = yy * W + centerOrder[i ^ f];
         if (this.grid[idx] === EMPTY) return idx;
       }
     }

@@ -1,10 +1,15 @@
 import type { LifeConfig } from './dates';
+import { isUnitId, type UnitId } from './units';
 
 const CONFIG_KEY = 'reloj-jubilacion.config.v1';
 const PROGRESS_KEY = 'reloj-jubilacion.progress.v1';
 const LAYERS_KEY = 'reloj-jubilacion.capas.v1';
 const SOUND_KEY = 'reloj-jubilacion.sonido.v1';
 const MILESTONES_KEY = 'reloj-jubilacion.hitos.v1';
+const UNIT_KEY = 'reloj-jubilacion.unidad.v1';
+
+/** Cada unidad guarda su progreso y sus hitos aparte; los días conservan las claves de siempre. */
+const perUnit = (key: string, unit: UnitId) => (unit === 'dias' ? key : key.replace('.v1', `.${unit}.v1`));
 
 export interface Progress {
   startDay: number;
@@ -46,14 +51,14 @@ export function saveConfig(cfg: LifeConfig): void {
   write(CONFIG_KEY, cfg);
 }
 
-export function loadProgress(): Progress | null {
-  const p = read<Progress>(PROGRESS_KEY);
+export function loadProgress(unit: UnitId = 'dias'): Progress | null {
+  const p = read<Progress>(perUnit(PROGRESS_KEY, unit));
   if (!p || typeof p.landed !== 'number' || typeof p.startDay !== 'number' || typeof p.total !== 'number') return null;
   return p;
 }
 
-export function saveProgress(p: Progress): void {
-  write(PROGRESS_KEY, p);
+export function saveProgress(p: Progress, unit: UnitId = 'dias'): void {
+  write(perUnit(PROGRESS_KEY, unit), p);
 }
 
 /** Si la arena se muestra por capas de años. */
@@ -79,11 +84,21 @@ export interface MilestonesSeen {
   upTo: number;
 }
 
-export function loadMilestonesSeen(): MilestonesSeen | null {
-  const m = read<MilestonesSeen>(MILESTONES_KEY);
+export function loadMilestonesSeen(unit: UnitId = 'dias'): MilestonesSeen | null {
+  const m = read<MilestonesSeen>(perUnit(MILESTONES_KEY, unit));
   return m && typeof m.key === 'string' && typeof m.upTo === 'number' ? m : null;
 }
 
-export function saveMilestonesSeen(m: MilestonesSeen): void {
-  write(MILESTONES_KEY, m);
+export function saveMilestonesSeen(m: MilestonesSeen, unit: UnitId = 'dias'): void {
+  write(perUnit(MILESTONES_KEY, unit), m);
+}
+
+/** Unidad de tiempo elegida (días laborables si no hay ninguna). */
+export function loadUnit(): UnitId {
+  const u = read<string>(UNIT_KEY);
+  return isUnitId(u) ? u : 'dias';
+}
+
+export function saveUnit(unit: UnitId): void {
+  write(UNIT_KEY, unit);
 }

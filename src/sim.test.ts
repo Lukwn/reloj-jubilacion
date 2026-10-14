@@ -18,7 +18,7 @@ describe('reloj de arena', () => {
     const { hg, sim } = setup(16_000, 400);
     expect(sim.countRows(0, hg.topEnd)).toBe(15_600);
     expect(sim.countRows(hg.bottomStart, hg.H)).toBe(400);
-    expect(sim.grid[sim.findNeckGrain()]).toBe(400 + 1);
+    expect(sim.grid[sim.findNeckGrain(0)]).toBe(400 + 1);
   });
 
   it('agitar no deja pasar ningún grano por el cuello y conserva las identidades', () => {
@@ -196,5 +196,78 @@ describe('reloj de arena', () => {
     expect(sim.sorting).toBe(false);
     const fresh = setup(8_000, 2_000).sim;
     expect(Array.from(sim.grid)).toEqual(Array.from(fresh.grid));
+  });
+
+  it('la caída rápida es simétrica: no vacía un lado antes ni ladea las fechas', () => {
+    // Como la reproducción rápida de la app: unos 22 granos por fotograma, 520 ms de vuelo,
+    // y las mismas llamadas que spawnHero y landHero.
+    const N = 11_000;
+    const { hg, sim } = setup(N, 0);
+    const cx = hg.W / 2;
+    const fallen = Math.floor(N * 0.7);
+    const inFlight: Array<{ id: number; at: number }> = [];
+    let next = 0;
+    for (let f = 0; next < fallen || inFlight.length; f++) {
+      for (let k = 0; k < 22 && next < fallen; k++) {
+        const id = next++;
+        const neck = sim.findNeckGrain();
+        if (neck !== sim.pos[id]) sim.swapCells(neck, sim.pos[id]);
+        sim.take(id);
+        sim.findLandingCell(0);
+        inFlight.push({ id, at: f + 31 });
+      }
+      while (inFlight.length && inFlight[0].at <= f) sim.put(inFlight.shift()!.id, sim.findLandingCell());
+      sim.step();
+      sim.step();
+    }
+    for (let f = 0; f < 600; f++) sim.step();
+    const meanDx = (from: number, to: number) => {
+      let s = 0;
+      for (let id = from; id < to; id++) s += (sim.pos[id] % hg.W) + 0.5 - cx;
+      return s / (to - from);
+    };
+    // Antes del arreglo, la arena de arriba quedaba ~20 celdas a la derecha y las fechas de abajo
+    // hasta ~15. Ahora el desvío es de una o dos celdas sobre una semianchura de ~70.
+    expect(Math.abs(meanDx(fallen, N))).toBeLessThan(4);
+    for (let d = 0; d < 10; d++) {
+      const from = Math.floor((fallen * d) / 10);
+      expect(Math.abs(meanDx(from, Math.floor((fallen * (d + 1)) / 10)))).toBeLessThan(4);
+    }
+    expect(sim.countRows(0, hg.topEnd)).toBe(N - fallen);
+    expect(sim.countRows(hg.bottomStart, hg.H)).toBe(fallen);
+  });
+
+  it('la reproducción lenta abre un cráter centrado: los huecos suben rectos', () => {
+    // Un grano cada 3 fotogramas (≈ 1 mes por segundo): cada hueco sube solo por la arena quieta.
+    const N = 11_000;
+    const drops = 2_000;
+    const { hg, sim } = setup(N, 0);
+    for (let f = 0, next = 0; next < drops; f++) {
+      if (f % 3 === 0) {
+        const id = next++;
+        const neck = sim.findNeckGrain();
+        if (neck !== sim.pos[id]) sim.swapCells(neck, sim.pos[id]);
+        sim.take(id);
+        sim.put(id, sim.findLandingCell());
+      }
+      sim.step();
+      sim.step();
+    }
+    for (let f = 0; f < 2000; f++) sim.step();
+    // Profundidad media de la superficie de arriba en cada mitad (sin los bordes).
+    const depth = (from: number, to: number) => {
+      let s = 0;
+      for (let x = from; x < to; x++) {
+        let y = 0;
+        while (y < hg.topEnd && sim.grid[y * hg.W + x] <= 0) y++;
+        s += y;
+      }
+      return s / (to - from);
+    };
+    const q = Math.floor(hg.W / 8);
+    const left = depth(q, hg.W / 2);
+    const right = depth(hg.W / 2, hg.W - q);
+    // Con el orden de proceso fijo, la derecha se hundía 42 filas y la izquierda 16.
+    expect(Math.abs(left - right)).toBeLessThan(3);
   });
 });

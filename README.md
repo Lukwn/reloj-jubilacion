@@ -18,6 +18,13 @@ Abre http://localhost:5173. La primera vez te pedirá la fecha de nacimiento, la
 
 ## Cómo se usa
 
+- **Unidad de tiempo** (selector sobre el contador): cada grano puede ser
+  - un **día laborable** (la de siempre);
+  - un **segundo de trabajo**: el reloj muestra tu jornada de hoy y cae un grano cada segundo, salvo en la comida y fuera de horario. El contador cuenta los segundos de trabajo que te quedan hasta la jubilación. El horario se configura en ajustes (por defecto, de 9:00 a 18:00 con la comida de 14:00 a 15:00);
+  - una **nómina**: el último día laborable de cada mes, con las pagas extra de junio y diciembre en dorado (14 pagas, o 12 si se elige en ajustes);
+  - un **año**: un grano por año natural, que cae en Nochevieja.
+  
+  Con pocos granos (nóminas, años) se dibujan como canicas. Cada unidad tiene sus frases, su cuenta atrás, sus hitos y su imagen para compartir; en segundos las capas son por horas, y no hay reproducción ni barra de edad.
 - **Clic o toque en un grano**: muestra su fecha y una frase.
 - **Lupa** (con ratón): al pasar por la arena, una lupa la amplía, recuadra el grano señalado y muestra su fecha (y el resumen del año con las capas activadas). Tras un clic se aparta hasta que el ratón se aleja.
 - **Con ratón, pulsar y arrastrar a un lado**: inclina el reloj entero (se dibuja girado y la gravedad de la arena lo sigue). Al soltarlo vuelve a su sitio. **Doble clic**: una vuelta completa.
@@ -41,6 +48,8 @@ Con `prefers-reduced-motion` no se puede agitar y las animaciones se reducen al 
 - `src/holidays.ts`: días laborables, Pascua y festivos.
 - `src/dates.ts`: lógica pura de fechas; el grano N es el N-ésimo día laborable. Trabaja con números de día civil (`Date.UTC` sobre año/mes/día), así que ni los años bisiestos ni el horario de verano desplazan los días.
 - `src/phrases.ts`: más de 70 frases agrupadas por tipo de día, elegidas de forma determinista según la fecha.
+- `src/units.ts`: las unidades de tiempo (días, segundos de la jornada, nóminas y años): qué día o segundo es cada grano, cuándo cae, sus textos y la cuenta atrás. Lógica pura, con tests.
+- `src/falling.ts`: el grano que cruza el cuello. Baja por el tubo y, al salir, cae hacia donde tire la gravedad (con el reloj inclinado, en diagonal) hasta chocar con la arena o el vidrio. Con el reloj tumbado o boca abajo, el cuello no deja pasar nada.
 - `src/hourglass.ts`: geometría del reloj sobre una rejilla. Se dimensiona para que cada bulbo quepa todos los granos con un 12 % de holgura.
 - `src/sim.ts`: arena por autómata celular. Cada celda guarda el ID del grano (ID = número de día laborable desde el inicio). Solo se procesan los granos activos, y los demás duermen. El cuello son celdas sólidas: el grano del día lo atraviesa como animación, fuera de la rejilla.
 - `src/countdown.ts`, `src/milestones.ts`: cuenta atrás e hitos (lógica pura, con tests).

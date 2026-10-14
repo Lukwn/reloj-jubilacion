@@ -57,6 +57,12 @@
     </div>
 
     <footer class="contador">
+      <div id="unidades" class="unidades" role="radiogroup" aria-label="Unidad de tiempo">
+        <button type="button" role="radio" data-unidad="dias" aria-checked="true">Días</button>
+        <button type="button" role="radio" data-unidad="segundos" aria-checked="false" tabindex="-1">Segundos</button>
+        <button type="button" role="radio" data-unidad="nominas" aria-checked="false" tabindex="-1">Nóminas</button>
+        <button type="button" role="radio" data-unidad="anios" aria-checked="false" tabindex="-1">Años</button>
+      </div>
       <div class="fila-contador">
       <button id="btn-play" class="play-btn" type="button" aria-label="Reproducir el paso del tiempo" title="Reproducir el paso del tiempo">
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/></svg>
@@ -116,8 +122,8 @@
 
     <dialog id="compartir" class="compartir">
       <h2>Comparte tu reloj</h2>
-      <img id="compartir-img" alt="Tu reloj de jubilación con los días laborables que te quedan" />
-      <p class="nota">La imagen solo muestra los días que te quedan y el porcentaje, no tu fecha de nacimiento.</p>
+      <img id="compartir-img" alt="Tu reloj de jubilación con lo que te queda hasta la jubilación" />
+      <p class="nota">La imagen solo muestra lo que te queda y el porcentaje, no tu fecha de nacimiento.</p>
       <p id="compartir-estado" class="nota" role="status"></p>
       <div class="acciones">
         <button id="btn-compartir-cerrar" type="button" class="secundario">Cerrar</button>
@@ -159,6 +165,24 @@
             <input type="text" name="extraHolidays" placeholder="24/06, 15/05, 09/11/2027" autocomplete="off" />
           </label>
           <p class="nota">DD/MM se repite cada año; DD/MM/AAAA es solo de ese año.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Nóminas y jornada</legend>
+          <label>Pagas al año
+            <select name="pagas">
+              <option value="14">14, con extras en junio y diciembre</option>
+              <option value="12">12, con las extras prorrateadas</option>
+            </select>
+          </label>
+          <div class="horas">
+            <label>Entrada <input type="time" name="jornadaInicio" value="09:00" /></label>
+            <label>Salida <input type="time" name="jornadaFin" value="18:00" /></label>
+          </div>
+          <div class="horas">
+            <label>Comida, de <input type="time" name="comidaInicio" value="14:00" /></label>
+            <label>a <input type="time" name="comidaFin" value="15:00" /></label>
+          </div>
+          <p class="nota">El horario es para la unidad de segundos. Sin pausa para comer, deja vacías esas dos horas.</p>
         </fieldset>
         <p id="error-ajustes" class="error" role="alert"></p>
         <div class="acciones">

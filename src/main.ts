@@ -1,21 +1,39 @@
 import './style.css';
 import {
   buildLife,
-  fallenCount,
   formatDayLong,
   formatInt,
   formatPercent,
-  grainDay,
   localDayNumber,
   msUntilNextLocalMidnight,
   validateConfig,
   type Life,
   type LifeConfig,
 } from './dates';
-import { phraseFor } from './phrases';
+import { grainPhrase } from './phrases';
+import {
+  buildGrains,
+  careerSeconds,
+  fallenAt,
+  fallenAtDay,
+  fallsAt,
+  grainTitle,
+  grainWhen,
+  isUnitId,
+  groupLabel,
+  jornadaFor,
+  plural as unitPlural,
+  UNIT_IDS,
+  UNIT_NAMES,
+  unitCountdown,
+  windowDayFor,
+  type GrainSet,
+  type UnitId,
+} from './units';
 import { designHourglass, type Hourglass } from './hourglass';
-import { SandSim } from './sim';
+import { EMPTY, SandSim } from './sim';
 import { LENS_RADIUS, Renderer, type HeroDraw, type Point } from './render';
+import { advanceFall, neckOpen, startFall, type FallingGrain } from './falling';
 import { motionImpulse, type ShakeImpulse } from './shake';
 import { dimColors, grainColors, unpackColor, yearLayers, type YearLayers } from './colors';
 import {
@@ -29,8 +47,10 @@ import {
   saveMilestonesSeen,
   saveProgress,
   saveSound,
+  loadUnit,
+  saveUnit,
 } from './storage';
-import { countdownText } from './countdown';
+import { formatDuration } from './countdown';
 import { milestonesFor, nextMilestone, type Milestone } from './milestones';
 import { SandSound } from './sound';
 import { CLOCK_SIZE, drawCard, SHARE_URL, shareText, toBlob } from './share';
@@ -92,15 +112,18 @@ interface Hero {
   t0: number;
   glowMs: number;
   fallMs: number;
-  x0: number;
-  y0: number;
-  y1: number;
+  /** Último instante simulado de la caída. */
+  last: number;
+  fall: FallingGrain;
   bright: number;
 }
 
 interface World {
   cfg: LifeConfig;
   life: Life;
+  unit: UnitId;
+  /** Los granos de la unidad: días, segundos de la jornada, nóminas o años. */
+  grains: GrainSet;
   hg: Hourglass;
   sim: SandSim;
   /** Paleta activa: la arena normal o las capas por años. */
@@ -137,40 +160,54 @@ let hoverYear = -1;
 
 // ---------------------------------------------------------------- mundo
 
-/** Lo que determina qué día es cada grano caído: el inicio y los festivos (no la edad de jubilación). */
-function lifeKey(cfg: LifeConfig): string {
-  return JSON.stringify([cfg.workStartDate, cfg.holyThursday ?? true, cfg.easterMonday ?? false, (cfg.extraHolidays ?? '').trim()]);
+/** Unidad de tiempo de los granos. */
+let unit: UnitId = loadUnit();
+
+/**
+ * Lo que determina qué es cada grano caído: el inicio y los festivos (no la edad de
+ * jubilación) y, en nóminas, las pagas al año.
+ */
+function lifeKey(cfg: LifeConfig, u: UnitId): string {
+  const key: unknown[] = [cfg.workStartDate, cfg.holyThursday ?? true, cfg.easterMonday ?? false, (cfg.extraHolidays ?? '').trim()];
+  if (u === 'nominas') key.push(cfg.pagas === 12 ? 12 : 14);
+  return JSON.stringify(key);
 }
 
 /** `shownOverride`: granos que empiezan ya caídos (0 para reproducir desde el principio). */
 function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   const life = buildLife(cfg);
-  const today = localDayNumber();
-  const target = fallenCount(life, today);
-  const key = lifeKey(cfg);
-  const prog = loadProgress();
-  const sameLife = prog && prog.startDay === life.startDay && (prog.key ? prog.key === key : prog.total === life.total);
-  // Primera visita (o vida laboral nueva): el reloj empieza lleno arriba y los días ya
+  const now = new Date();
+  const today = localDayNumber(now);
+  const grains = buildGrains(life, cfg, unit, now);
+  const target = fallenAt(grains, now);
+  const key = lifeKey(cfg, unit);
+  // Los segundos son solo la jornada de hoy: no hay nada que recordar entre visitas.
+  const live = unit === 'segundos';
+  const prog = live ? null : loadProgress(unit);
+  const sameLife = prog && prog.startDay === life.startDay && (prog.key ? prog.key === key : prog.total === grains.total);
+  // Primera visita (o vida laboral nueva): el reloj empieza lleno arriba y los granos ya
   // vividos caen delante de ti. Si vuelves tras unos días, caen solo los pendientes.
-  const shown = shownOverride ?? (sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
+  const shown = shownOverride ?? (live ? target : sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
 
-  const hg = designHourglass(life.total);
-  const sim = new SandSim(hg, life.total);
+  const hg = designHourglass(grains.total);
+  const sim = new SandSim(hg, grains.total);
   sim.pack(shown);
-  const sandColors = grainColors(life);
-  const layers = yearLayers(life);
+  const sandColors = grainColors(grains, life.startDay);
+  const layers = yearLayers(grains, life.startDay);
   const renderer = new Renderer(canvas, hg, sim, sandColors);
   if (topExtra) {
     renderer.topExtra = topExtra;
     renderer.resize();
   }
-  const milestones = milestonesFor(life.total);
+  const milestones = milestonesFor(grains.total, unit);
   // La primera vez, los hitos ya pasados no se celebran (caerían todos de golpe).
-  const seen = loadMilestonesSeen();
+  const seen = live ? null : loadMilestonesSeen(unit);
 
   world = {
     cfg,
     life,
+    unit,
+    grains,
     hg,
     sim,
     colors: sandColors,
@@ -201,17 +238,23 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
 }
 
 function persistProgress(w: World): void {
-  // Lo que pasa durante una reproducción no es real: no se guarda.
-  if (play) return;
-  saveProgress({ startDay: w.life.startDay, total: w.life.total, landed: w.landed, key: w.key });
-  saveMilestonesSeen({ key: w.key, upTo: w.seenUpTo });
+  // Lo que pasa durante una reproducción no es real, y los segundos son solo de hoy: no se guarda.
+  if (play || w.unit === 'segundos') return;
+  saveProgress({ startDay: w.life.startDay, total: w.grains.total, landed: w.landed, key: w.key }, w.unit);
+  saveMilestonesSeen({ key: w.key, upTo: w.seenUpTo }, w.unit);
 }
 
 function checkDay(): void {
   const w = world;
   if (!w || play) return;
-  w.today = localDayNumber();
-  w.target = fallenCount(w.life, w.today);
+  const now = new Date();
+  // A medianoche, la unidad de segundos pasa a la jornada siguiente.
+  if (w.unit === 'segundos' && windowDayFor(w.life, now) !== w.grains.window!.day) {
+    createWorld(w.cfg);
+    return;
+  }
+  w.today = localDayNumber(now);
+  w.target = fallenAt(w.grains, now);
   updateCounter();
 }
 
@@ -241,15 +284,22 @@ function spawnHero(w: World, now: number, glowMs: number, fallMs: number, bright
   const from = cellPoint(w, sim.pos[id]);
   sim.take(id);
   w.nextDrop++;
-  const landing = sim.findLandingCell();
-  const to = landing >= 0 ? cellPoint(w, landing) : { x: w.hg.W / 2, y: w.hg.H - 1 };
-  const hero: Hero = { id, t0: now, glowMs, fallMs, x0: from.x, y0: from.y, y1: to.y, bright };
+  // Altura de una caída en vertical, para ajustar la gravedad a la duración prevista. El sitio
+  // real donde se posa sale de la propia caída, según hacia dónde tire la gravedad.
+  const landing = sim.findLandingCell(0);
+  const toY = landing >= 0 ? cellPoint(w, landing).y : w.hg.H - 1;
+  // Baja por una de las dos columnas centrales, alternando, para no ladear la arena.
+  const lane = w.hg.W / 2 - 0.5 + (id & 1);
+  const start = now + glowMs;
+  const fall = startFall(from.x, from.y, toY - from.y, fallMs, lane);
+  const hero: Hero = { id, t0: now, glowMs, fallMs, last: start, fall, bright };
   w.heroes.push(hero);
   return hero;
 }
 
-function landHero(w: World, h: Hero): void {
-  const idx = w.sim.findLandingCell();
+/** Posa el grano en la celda donde ha chocado (o, si ya no está libre, en la cima del montón). */
+function landHero(w: World, h: Hero, cell = -1): void {
+  const idx = cell >= 0 && w.sim.grid[cell] === EMPTY ? cell : w.sim.findLandingCell();
   if (idx >= 0) w.sim.put(h.id, idx);
   w.landed++;
   const m = w.milestoneById.get(h.id);
@@ -270,20 +320,36 @@ function landHero(w: World, h: Hero): void {
   updateCounter();
 }
 
-function heroPoint(w: World, h: Hero, now: number): Point {
-  const p = Math.max(0, Math.min(1, (now - h.t0 - h.glowMs) / h.fallMs));
-  const cx = w.hg.W / 2;
-  return { x: h.x0 + (cx - h.x0) * Math.min(1, p * 4), y: h.y0 + (h.y1 - h.y0) * p * p };
+function heroPoint(h: Hero): Point {
+  return { x: h.fall.x, y: h.fall.y };
+}
+
+/** Mueve los granos que caen con la gravedad actual y posa los que han chocado. */
+function updateHeroes(w: World, now: number): void {
+  const angle = w.sim.fallAngle;
+  for (let i = w.heroes.length - 1; i >= 0; i--) {
+    const h = w.heroes[i];
+    const start = h.t0 + h.glowMs;
+    if (now <= start) continue;
+    // Tras un rato sin fotogramas, no se da un salto enorme de golpe.
+    const dt = Math.min(50, now - Math.max(h.last, start));
+    h.last = now;
+    const cell = advanceFall(h.fall, w.sim, angle, dt);
+    // Por si acaso: ningún grano se queda en el aire para siempre.
+    const stuck = cell < 0 && now - start > h.fallMs * 6 + 4000;
+    if (cell < 0 && !stuck) continue;
+    w.heroes.splice(i, 1);
+    landHero(w, h, cell);
+  }
+}
+
+/** ¿Pasa la arena por el cuello? No si el reloj (o el móvil) está tumbado o boca abajo. */
+function neckFlows(w: World): boolean {
+  return neckOpen(w.sim.fallAngle);
 }
 
 function updateDrops(w: World, now: number): void {
-  for (let i = w.heroes.length - 1; i >= 0; i--) {
-    const h = w.heroes[i];
-    if (now - h.t0 >= h.glowMs + h.fallMs) {
-      w.heroes.splice(i, 1);
-      landHero(w, h);
-    }
-  }
+  updateHeroes(w, now);
 
   if (play) {
     spawnPlayGrains(w, now);
@@ -301,6 +367,14 @@ function updateDrops(w: World, now: number): void {
   const backlog = w.target - w.nextDrop;
   if (backlog <= 0) {
     w.catchUpInterval = 0;
+    return;
+  }
+  // Con el reloj tumbado la arena no pasa: esperan en el bulbo de arriba hasta que se endereza.
+  if (!neckFlows(w)) return;
+
+  // Segundos: un grano por segundo, en un goteo constante, sin esperar a que se pose el anterior.
+  if (w.unit === 'segundos' && backlog <= 3) {
+    while (w.nextDrop < w.target) if (!spawnHero(w, now, 0, reducedMotion ? 350 : 900, 0.15)) break;
     return;
   }
 
@@ -340,10 +414,12 @@ function updateDrops(w: World, now: number): void {
 /** Mantiene el grano de hoy en la boca del cuello mientras la arena está quieta. */
 function keepTodayAtNeck(w: World): void {
   const id = w.target;
-  if (id >= w.life.total || w.nextDrop !== w.target || w.sim.agitation > 0) return;
+  // En segundos no hay un «grano de hoy»: caen sin parar.
+  if (w.unit === 'segundos' || id >= w.grains.total || w.nextDrop !== w.target || w.sim.agitation > 0) return;
   const at = w.sim.pos[id];
   if (at < 0) return;
-  const neck = w.sim.findNeckGrain();
+  // Siempre el mismo lado del empate, para que el grano de hoy no salte de celda cada fotograma.
+  const neck = w.sim.findNeckGrain(0);
   if (neck >= 0 && neck !== at) w.sim.swapCells(neck, at);
 }
 
@@ -430,10 +506,9 @@ function askMotionPermission(): void {
 function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number {
   const { renderer, sim } = w;
   const g = renderer.toGrid(cssX, cssY);
-  const now = performance.now();
   const reach = Math.max(1.5, ((touch ? 16 : 7) * renderer.dpr) / renderer.s);
   for (const h of w.heroes) {
-    const p = heroPoint(w, h, now);
+    const p = heroPoint(h);
     if (Math.hypot(p.x - g.x, p.y - g.y) <= reach * 1.5) return h.id;
   }
   // Con el dedo, los hitos que brillan son más fáciles de tocar. Con el ratón (y la lupa)
@@ -465,18 +540,19 @@ function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number
 }
 
 function showTooltip(w: World, id: number, cssX: number, cssY: number): void {
-  const day = grainDay(w.life, id);
-  const date = formatDayLong(day);
-  tooltipDate.textContent = date;
+  tooltipDate.textContent = grainTitle(w.grains, id);
   tooltipWhen.textContent = whenText(w, id);
-  tooltipPhrase.textContent = phraseFor(day, {
+  tooltipPhrase.textContent = grainPhrase(w.grains, id, {
     today: w.today,
     birthDay: w.life.birthDay,
     lastDay: w.life.lastDay,
     isWorkday: w.life.isWorkday,
+    target: w.target,
   });
-  if (layersOn) tooltipYear.textContent = yearSummary(w, w.layers.yearOf[id]);
-  tooltipYear.hidden = !layersOn;
+  // En años, cada capa es un solo grano y el título ya dice cuál es.
+  const summary = layersOn && w.unit !== 'anios';
+  if (summary) tooltipYear.textContent = yearSummary(w, w.layers.yearOf[id]);
+  tooltipYear.hidden = !summary;
   const m = w.milestoneById.get(id);
   tooltipMilestone.hidden = !m;
   if (m) tooltipMilestone.textContent = m.id >= w.landed ? `Hito: ${m.label}` : `Hito alcanzado: ${m.label}`;
@@ -507,30 +583,24 @@ function applyPalette(w: World): void {
   else w.renderer.setColors(w.colors, w.sandDim);
 }
 
-const plural = (n: number, one: string, many: string) => `${formatInt(n)} ${n === 1 ? one : many}`;
-
-/** Los días laborables que tiene un año: «Año 2040: 252 días laborables», o cuántos quedan del año en curso. */
-function yearSummary(w: World, year: number): string {
-  const total = w.layers.counts.get(year) ?? 0;
-  const first = w.layers.first.get(year) ?? 0;
+/**
+ * Los granos de una capa: «Año 2040: 252 días laborables», «De 11:00 a 12:00: quedan 1.234 de
+ * sus 3.600 segundos de trabajo», o cuántos quedan de la capa en curso.
+ */
+function yearSummary(w: World, group: number): string {
+  const total = w.layers.counts.get(group) ?? 0;
+  const first = w.layers.first.get(group) ?? 0;
   const ahead = Math.max(0, Math.min(total, first + total - Math.max(first, w.landed)));
-  const days = plural(total, 'día laborable', 'días laborables');
-  if (ahead === 0) return `Año ${year}: ${days}, ya trabajados`;
-  if (ahead === total) return `Año ${year}: ${days}`;
-  return `Año ${year}: quedan ${formatInt(ahead)} de sus ${days}`;
+  const name = groupLabel(w.grains, group);
+  const grains = unitPlural(total, w.unit);
+  if (ahead === 0) return `${name}: ${grains}, ya ${UNIT_NAMES[w.unit].done}`;
+  if (ahead === total) return `${name}: ${grains}`;
+  return `${name}: quedan ${formatInt(ahead)} de sus ${grains}`;
 }
 
-/** Cuánto falta para el día de un grano, o cuánto hace, contado en días laborables desde hoy. */
+/** Cuándo cae (o cayó) un grano, contado desde hoy (o desde el día que se reproduce). */
 function whenText(w: World, id: number): string {
-  const day = grainDay(w.life, id);
-  if (day === w.today) return 'Hoy';
-  // w.target es el primer grano de hoy en adelante: hoy si es laborable, si no el siguiente.
-  if (id >= w.target) {
-    const n = id - w.target + (w.life.isWorkday(w.today) ? 0 : 1);
-    return n === 1 ? 'El próximo día laborable' : `Dentro de ${formatInt(n)} días laborables`;
-  }
-  const n = w.target - id;
-  return n === 1 ? 'El último día laborable' : `Hace ${formatInt(n)} días laborables`;
+  return grainWhen(w.grains, w.life, id, w.target, w.today, new Date());
 }
 
 // ---------------------------------------------------------------- lupa
@@ -548,12 +618,12 @@ function showLens(w: World, id: number, cssX: number, cssY: number): void {
     return;
   }
   const date = document.createElement('strong');
-  date.textContent = formatDayLong(grainDay(w.life, id));
+  date.textContent = grainTitle(w.grains, id);
   const when = document.createElement('span');
   when.className = 'cuando';
   when.textContent = whenText(w, id);
   lensLabel.replaceChildren(date, when);
-  if (layersOn) {
+  if (layersOn && w.unit !== 'anios') {
     const year = document.createElement('span');
     year.textContent = yearSummary(w, w.layers.yearOf[id]);
     lensLabel.append(year);
@@ -589,7 +659,7 @@ function setLayers(on: boolean): void {
   hideTooltip();
   hideLens();
   if (world) applyPalette(world);
-  if (on) showHint('Cada color es un año · pasa por encima o toca la arena para ver cuál');
+  if (on) showHint(`Cada color es ${unit === 'segundos' ? 'una hora' : 'un año'} · pasa por encima o toca la arena para ver cuál`);
 }
 
 layersBtn.setAttribute('aria-pressed', String(layersOn));
@@ -695,8 +765,8 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (e.pointerType !== 'mouse') return;
-  // Con el reloj girado, la lupa estorbaría.
-  if (viewAngle !== 0 || spinStart >= 0) {
+  // Con el reloj girado, la lupa estorbaría; con canicas grandes, no hace falta.
+  if (viewAngle !== 0 || spinStart >= 0 || w.renderer.marbles) {
     hideLens();
     return;
   }
@@ -792,13 +862,25 @@ function updateCounter(): void {
     counterEl.textContent = '';
     return;
   }
-  const remaining = w.life.total - w.landed;
-  const pct = formatPercent(w.landed / w.life.total);
-  if (remaining <= 0) counterEl.textContent = `0 días laborables · ${pct} completado · ¡Jubilación!`;
-  else {
-    const unit = remaining === 1 ? 'día laborable' : 'días laborables';
-    counterEl.textContent = `${formatInt(remaining)} ${unit} · ${pct} completado`;
+  const { remaining, fraction } = remainingNow(w);
+  const pct = formatPercent(fraction);
+  const text =
+    remaining <= 0
+      ? `0 ${UNIT_NAMES[w.unit].many} · ${pct} completado · ¡Jubilación!`
+      : `${unitPlural(remaining, w.unit)} · ${pct} completado`;
+  if (counterEl.textContent !== text) counterEl.textContent = text;
+}
+
+/**
+ * Lo que queda hasta la jubilación en la unidad del reloj. En segundos se cuentan los de toda
+ * la vida laboral (el reloj solo muestra la jornada de hoy); en las demás, los granos de arriba.
+ */
+function remainingNow(w: World): { remaining: number; fraction: number } {
+  if (w.unit === 'segundos') {
+    const { left, total } = careerSeconds(w.life, w.grains.window!.jornada, new Date());
+    return { remaining: left, fraction: 1 - left / total };
   }
+  return { remaining: w.grains.total - w.landed, fraction: w.landed / w.grains.total };
 }
 
 // ---------------------------------------------------------------- ajustes
@@ -812,6 +894,11 @@ function openSettings(): void {
   f.holyThursday.checked = cfg?.holyThursday ?? true;
   f.easterMonday.checked = cfg?.easterMonday ?? false;
   f.extraHolidays.value = cfg?.extraHolidays ?? '';
+  f.pagas.value = String(cfg?.pagas === 12 ? 12 : 14);
+  f.jornadaInicio.value = cfg?.jornadaInicio || '09:00';
+  f.jornadaFin.value = cfg?.jornadaFin || '18:00';
+  f.comidaInicio.value = cfg?.comidaInicio ?? '14:00';
+  f.comidaFin.value = cfg?.comidaFin ?? '15:00';
   formError.textContent = '';
   cancelBtn.hidden = !world;
   dialog.showModal();
@@ -842,8 +929,14 @@ form.addEventListener('submit', (e) => {
     holyThursday: f.holyThursday.checked,
     easterMonday: f.easterMonday.checked,
     extraHolidays: f.extraHolidays.value.trim(),
+    pagas: Number(f.pagas.value) === 12 ? 12 : 14,
+    jornadaInicio: f.jornadaInicio.value,
+    jornadaFin: f.jornadaFin.value,
+    comidaInicio: f.comidaInicio.value,
+    comidaFin: f.comidaFin.value,
   };
-  const error = validateConfig(cfg);
+  const jornada = jornadaFor(cfg);
+  const error = validateConfig(cfg) ?? (typeof jornada === 'string' ? jornada : null);
   if (error) {
     formError.textContent = error;
     return;
@@ -857,7 +950,7 @@ form.addEventListener('submit', (e) => {
 
 function celebrate(w: World, m: Milestone): void {
   milestoneTitle.textContent = m.title;
-  milestoneDate.textContent = formatDayLong(grainDay(w.life, m.id));
+  milestoneDate.textContent = grainTitle(w.grains, m.id);
   // Reproduciendo, el aviso sale justo debajo del panel de reproducción en vez de detrás.
   milestoneEl.classList.toggle('en-reproduccion', !!play);
   // (La animación de entrada lo sube 12 px: se deja margen para que no roce el panel.)
@@ -896,15 +989,17 @@ function updateCountdown(): void {
   const w = world;
   let line = '';
   if (w && !play) {
-    line = countdownText(w.life, new Date()) ?? '';
+    line = unitCountdown(w.grains, w.life, new Date()) ?? '';
     // Cada 8 s se alterna con el próximo hito.
     const next = nextMilestone(w.milestones, w.landed);
     if (next && Math.floor(Date.now() / 8000) % 2 === 1) {
       const n = next.id + 1 - w.landed;
-      line =
-        n === 1
-          ? `Próximo hito: ${next.short}, con el próximo grano`
-          : `Próximo hito: ${next.short}, dentro de ${formatInt(n)} días laborables`;
+      // En segundos la comida para el reloj: mejor decir cuándo cae que cuántos granos faltan.
+      const when =
+        w.unit === 'segundos'
+          ? `dentro de ${formatDuration(fallsAt(w.grains, next.id) - Date.now())}`
+          : `dentro de ${unitPlural(n, w.unit)}`;
+      line = n === 1 ? `Próximo hito: ${next.short}, con el próximo grano` : `Próximo hito: ${next.short}, ${when}`;
     }
   }
   if (countdownEl.textContent !== line) countdownEl.textContent = line;
@@ -936,7 +1031,8 @@ let ageCutoff = -1;
 
 function openAgePanel(): void {
   const w = world;
-  if (!w || play) return;
+  // En segundos el reloj es solo la jornada de hoy: la edad de jubilación no cambia nada en él.
+  if (!w || play || w.unit === 'segundos') return;
   const cur = w.cfg.retirementAge;
   ageInput.min = String(Math.max(40, Math.min(60, cur)));
   ageInput.max = String(Math.min(90, Math.max(70, cur)));
@@ -969,18 +1065,19 @@ function updateAgePreview(): void {
     return;
   }
   const life = buildLife(cfg);
-  if (fallenCount(life, w.today) >= life.total) {
+  const alt = buildGrains(life, cfg, w.unit);
+  if (fallenAtDay(alt, w.today) >= alt.total) {
     ageText.textContent = `A los ${age} ya te habrías jubilado: toda la arena de arriba sobraría.`;
     ageUse.disabled = true;
     ageCutoff = w.landed;
     return;
   }
-  const ahead = life.total - w.landed;
-  const diff = life.total - w.life.total;
+  const ahead = alt.total - w.landed;
+  const diff = alt.total - w.grains.total;
   const when = `Te jubilarías el ${lowerFirst(formatDayLong(life.retireDay))}.`;
   ageUse.disabled = age === w.cfg.retirementAge;
-  ageCutoff = diff < 0 ? life.total : -1;
-  const days = `${formatInt(ahead)} días laborables por delante`;
+  ageCutoff = diff < 0 ? alt.total : -1;
+  const days = `${unitPlural(ahead, w.unit)} por delante`;
   if (diff === 0) ageText.textContent = `${days}. Es tu edad actual. ${when}`;
   else if (diff < 0) {
     ageText.textContent = `${days}: ${formatInt(-diff)} menos. Los granos transparentes son los que te ahorrarías. ${when}`;
@@ -1015,10 +1112,13 @@ function openShare(): void {
   if (!w || play) return;
   hideTooltip();
   closeAgePanel();
+  const { remaining, fraction } = remainingNow(w);
+  const names = UNIT_NAMES[w.unit];
   const info = {
-    remaining: formatInt(w.life.total - w.landed),
-    percent: formatPercent(w.landed / w.life.total),
-    fraction: w.landed / w.life.total,
+    remaining: formatInt(remaining),
+    what: remaining === 1 ? names.one : names.many,
+    percent: formatPercent(fraction),
+    fraction,
   };
   const frame = { time: performance.now(), heroes: [], today: null, selected: null, highlight: -1, cutoff: -1, marks: [], finger: null };
   const { canvas: clock } = w.renderer.snapshot(CLOCK_SIZE.width, CLOCK_SIZE.height, frame);
@@ -1101,7 +1201,8 @@ function openPlayPanel(): void {
 
 function startPlay(fromStart: boolean): void {
   const w = world;
-  if (!w) return;
+  // En segundos el reloj es solo la jornada de hoy: no hay años que reproducir.
+  if (!w || w.unit === 'segundos') return;
   hideTooltip();
   hideLens();
   closeAgePanel();
@@ -1160,7 +1261,7 @@ function updatePlay(w: World, now: number): void {
   const day = Math.floor(play.day);
   // Las fechas de los granos («dentro de…», «hoy») se cuentan desde el día reproducido.
   w.today = day;
-  w.target = fallenCount(w.life, day);
+  w.target = fallenAtDay(w.grains, day);
   if (day !== lastPlayDay) {
     lastPlayDay = day;
     playDate.textContent = formatDayLong(day);
@@ -1178,6 +1279,8 @@ function spawnPlayGrains(w: World, now: number): void {
   const speed = SPEEDS[speedIdx][0];
   const fallMs = reducedMotion ? 0 : speed <= 1 ? 1100 : speed <= 7 ? 800 : 520;
   const bright = speed <= 7 ? 0.8 : 0;
+  // Tumbado o boca abajo no pasa nada por el cuello; al enderezarlo sale lo acumulado.
+  if (!neckFlows(w)) return;
   let budget = 80;
   while (w.nextDrop < w.target && budget-- > 0) {
     const h = spawnHero(w, now, 0, fallMs, bright);
@@ -1230,6 +1333,14 @@ function tick(now: number): void {
 
   const w = world;
   if (!w) return;
+  // En segundos el objetivo avanza con el reloj del sistema, no a medianoche.
+  if (!play && w.unit === 'segundos') {
+    const target = fallenAt(w.grains, new Date());
+    if (target !== w.target) {
+      w.target = target;
+      updateCounter();
+    }
+  }
   updatePlay(w, now);
   // Un aviso de la reproducción nunca sobrevive a ella.
   if (!play && !milestoneEl.hidden && milestoneEl.classList.contains('en-reproduccion')) hideMilestone();
@@ -1253,20 +1364,20 @@ function tick(now: number): void {
   sim.tilt = Math.abs(sim.tilt) > 0.02 ? sim.tilt * 0.93 : 0;
 
   const heroes: HeroDraw[] = w.heroes.map((h) => {
-    const p = heroPoint(w, h, now);
+    const p = heroPoint(h);
     const glow = h.glowMs > 0 ? Math.min(1, (now - h.t0) / h.glowMs) : 1;
     return { ...p, color: unpackColor(w.colors[h.id]), glow: glow * h.bright };
   });
 
   let today: Point | null = null;
-  if (w.target < w.life.total && w.nextDrop === w.target && w.sim.pos[w.target] >= 0) {
+  if (w.unit !== 'segundos' && w.target < w.grains.total && w.nextDrop === w.target && w.sim.pos[w.target] >= 0) {
     today = cellPoint(w, w.sim.pos[w.target]);
   }
 
   let selected: Point | null = null;
   if (selectedId >= 0) {
     const hero = w.heroes.find((h) => h.id === selectedId);
-    if (hero) selected = heroPoint(w, hero, now);
+    if (hero) selected = heroPoint(hero);
     else if (sim.pos[selectedId] >= 0) selected = cellPoint(w, sim.pos[selectedId]);
   }
 
@@ -1321,8 +1432,69 @@ if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
 }
 window.setTimeout(() => hintEl.classList.add('oculta'), 10_000);
 
+// ---------------------------------------------------------------- unidad de tiempo
+
+const unitBox = $('unidades');
+const unitButtons = [...unitBox.querySelectorAll<HTMLButtonElement>('[data-unidad]')];
+
+const unitHint = (u: UnitId) =>
+  `Cada grano es ${UNIT_NAMES[u].grain} · toca uno para verlo · arrastra o agita para remover la arena`;
+
+/** Pone los botones y textos de acuerdo con la unidad elegida. */
+function updateUnitUi(): void {
+  for (const b of unitButtons) {
+    const on = b.dataset.unidad === unit;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+  const live = unit === 'segundos';
+  // En segundos el reloj es solo la jornada de hoy: ni reproducción ni edad de jubilación.
+  if (!play) playBtn.hidden = live;
+  ageBtn.setAttribute('aria-disabled', String(live));
+  ageBtn.title = live ? 'Segundos de trabajo que te quedan hasta la jubilación' : '¿Y si me jubilo a otra edad?';
+  const layersName = live ? 'Capas por horas' : 'Capas por años';
+  layersBtn.title = layersName;
+  layersBtn.setAttribute('aria-label', layersName);
+}
+
+function setUnit(u: UnitId): void {
+  if (u === unit) return;
+  unit = u;
+  saveUnit(u);
+  closeAgePanel();
+  hideTooltip();
+  hideLens();
+  // Al salir de la reproducción ya se crea el reloj real con la unidad nueva.
+  if (play) exitPlay();
+  else {
+    const cfg = world?.cfg ?? loadConfig();
+    if (cfg && !validateConfig(cfg)) createWorld(cfg);
+  }
+  updateUnitUi();
+  showHint(unitHint(u));
+}
+
+for (const b of unitButtons) {
+  b.addEventListener('click', () => {
+    const u = b.dataset.unidad;
+    if (isUnitId(u)) setUnit(u);
+  });
+}
+// Con el teclado, las flechas cambian de opción, como en cualquier grupo de botones de radio.
+unitBox.addEventListener('keydown', (e) => {
+  const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+  if (!step) return;
+  e.preventDefault();
+  const next = UNIT_IDS[(UNIT_IDS.indexOf(unit) + step + UNIT_IDS.length) % UNIT_IDS.length];
+  setUnit(next);
+  unitButtons.find((b) => b.dataset.unidad === next)?.focus();
+});
+
+hintEl.textContent = unitHint(unit);
+updateUnitUi();
+
 const initial = loadConfig();
-if (initial && !validateConfig(initial)) createWorld(initial);
+if (initial && !validateConfig(initial) && typeof jornadaFor(initial) !== 'string') createWorld(initial);
 else openSettings();
 scheduleMidnight();
 requestAnimationFrame(frame);
@@ -1338,10 +1510,16 @@ if (import.meta.env.DEV) {
     exitPlay,
     play: () => play,
     startSort,
+    setUnit,
     tiltTo: (deg: number) => {
       if (!world) return;
       world.sim.gravityAngle = (deg * Math.PI) / 180;
       world.sim.wakeAll();
+    },
+    /** Inclina el reloj dibujado como al arrastrar con el ratón (sin soltar); null lo suelta. */
+    viewTo: (deg: number | null) => {
+      tilting = deg !== null;
+      if (deg !== null) tiltTarget = (deg * Math.PI) / 180;
     },
     celebrate: (i = 0) => world && celebrate(world, world.milestones[i]),
     openShare,

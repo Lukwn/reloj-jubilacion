@@ -20,6 +20,13 @@ export interface LifeConfig {
   holyThursday?: boolean; // por defecto, sí
   easterMonday?: boolean; // por defecto, no
   extraHolidays?: string; // "24/06, 09/11/2027"
+  /** Pagas al año, para la unidad de nóminas: 12 o 14 (por defecto). */
+  pagas?: number;
+  /** Horario, para la unidad de segundos: "HH:MM". Sin comida si se dejan vacías. */
+  jornadaInicio?: string; // por defecto 09:00
+  jornadaFin?: string; // por defecto 18:00
+  comidaInicio?: string; // por defecto 14:00
+  comidaFin?: string; // por defecto 15:00
 }
 
 export interface Life {
@@ -133,8 +140,8 @@ export function buildLife(cfg: LifeConfig): Life {
   return { birthDay, startDay, retireDay, lastDay: workDays[total - 1], total, workDays, isWorkday };
 }
 
-/** Primer índice cuyo día es >= day. */
-function lowerBound(days: Int32Array, day: number): number {
+/** Primer índice cuyo día es >= day, en una lista de días ordenada. */
+export function lowerBound(days: Int32Array, day: number): number {
   let lo = 0;
   let hi = days.length;
   while (lo < hi) {

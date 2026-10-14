@@ -44,7 +44,7 @@ interface Theme {
 export const LENS_RADIUS = 64;
 
 const TOP_RESERVE = 56;
-const BOTTOM_RESERVE = 76;
+const BOTTOM_RESERVE = 104;
 const CAP_CSS = 14;
 
 export class Renderer {
@@ -118,24 +118,78 @@ export class Renderer {
     this.s = Math.max(0.5, Math.min(availW / (W + 4), availH / H));
     this.ox = Math.round((this.canvas.width - W * this.s) / 2);
     this.oy = Math.round((top + CAP_CSS) * dpr + (availH - H * this.s) / 2);
+    // Con pocos granos (años, nóminas) las celdas son grandes: se pintan como canicas.
+    this.marbles = this.sim.grainCount <= 5000 && this.s >= 6;
     this.glass = this.buildGlassPath();
   }
+
+  /** Los granos se dibujan como canicas redondas en vez de píxeles. */
+  marbles = false;
 
   private buildGlassPath(): Path2D {
     const { H, W, half } = this.hg;
     const s = this.s;
     const cx = this.ox + (W / 2) * s;
     const pad = 0.6;
+    // En cada frontera entre filas, la más ancha de las dos: así el vidrio envuelve las celdas
+    // enteras aunque sean grandes y el perfil cambie mucho de una fila a otra.
+    const edge = (y: number) => Math.max(half[Math.max(0, y - 1)], half[Math.min(H - 1, y)]) + pad;
     const p = new Path2D();
     const yAt = (y: number) => this.oy + y * s;
-    p.moveTo(cx - (half[0] + pad) * s, yAt(0));
-    for (let y = 0; y < H; y++) p.lineTo(cx - (half[y] + pad) * s, yAt(y + 0.5));
-    p.lineTo(cx - (half[H - 1] + pad) * s, yAt(H));
-    p.lineTo(cx + (half[H - 1] + pad) * s, yAt(H));
-    for (let y = H - 1; y >= 0; y--) p.lineTo(cx + (half[y] + pad) * s, yAt(y + 0.5));
-    p.lineTo(cx + (half[0] + pad) * s, yAt(0));
+    p.moveTo(cx - edge(0) * s, yAt(0));
+    for (let y = 1; y <= H; y++) p.lineTo(cx - edge(y) * s, yAt(y));
+    p.lineTo(cx + edge(H) * s, yAt(H));
+    for (let y = H - 1; y >= 0; y--) p.lineTo(cx + edge(y) * s, yAt(y));
     p.closePath();
     return p;
+  }
+
+  /** Cadenas CSS de los colores empaquetados, para las canicas. */
+  private css = new Map<number, string>();
+  private cssOf(c: number): string {
+    let v = this.css.get(c);
+    if (!v) {
+      const a = (c >>> 24) / 255;
+      v = `rgba(${c & 0xff},${(c >>> 8) & 0xff},${(c >>> 16) & 0xff},${a.toFixed(2)})`;
+      this.css.set(c, v);
+    }
+    return v;
+  }
+
+  /** Radio de un grano suelto (el que cae, el seleccionado…) en píxeles de dispositivo. */
+  private grainRadius(): number {
+    return this.marbles ? this.s * 0.46 : Math.max(1.6 * this.dpr, this.s * 0.9);
+  }
+
+  /** Dibuja la arena: el lienzo auxiliar escalado o, con celdas grandes, una canica por grano. */
+  private drawSand(ctx: CanvasRenderingContext2D): void {
+    const { hg, s } = this;
+    if (!this.marbles) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
+      return;
+    }
+    const buf = this.buf;
+    const r = s * 0.46;
+    for (let i = 0; i < buf.length; i++) {
+      const c = buf[i];
+      if (c === 0) continue;
+      ctx.fillStyle = this.cssOf(c);
+      ctx.beginPath();
+      ctx.arc(this.ox + ((i % hg.W) + 0.5) * s, this.oy + (Math.floor(i / hg.W) + 0.5) * s, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Un brillo pequeño arriba a la izquierda de cada canica, todos de una vez.
+    const shine = new Path2D();
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] === 0 || buf[i] >>> 24 < 200) continue;
+      const x = this.ox + ((i % hg.W) + 0.34) * s;
+      const y = this.oy + (Math.floor(i / hg.W) + 0.32) * s;
+      shine.moveTo(x + r * 0.2, y);
+      shine.arc(x, y, r * 0.2, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fill(shine);
   }
 
   /** Centro del reloj en píxeles de dispositivo: el eje sobre el que gira. */
@@ -231,29 +285,31 @@ export class Renderer {
     ctx.fillStyle = theme.glassFill;
     ctx.fill(this.glass);
 
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.off, this.ox, this.oy, W * s, H * s);
+    this.drawSand(ctx);
+
+    // Los brillos se miden en celdas; con canicas, una celda ya es grande.
+    const glowCells = (fine: number, big: number) => s * (this.marbles ? big : fine);
 
     // Hitos pendientes: un brillo pequeño que late despacio
     if (f.marks.length) {
       const pulse = 0.5 + 0.3 * Math.sin(f.time / 900);
-      for (const m of f.marks) this.drawGlow(m, Math.max(5 * dpr, s * 3.5), pulse);
+      for (const m of f.marks) this.drawGlow(m, Math.max(5 * dpr, glowCells(3.5, 0.9)), pulse);
     }
 
     // Grano de hoy, esperando en el cuello
     if (f.today) {
       const pulse = 0.55 + 0.45 * Math.sin(f.time / 600);
-      this.drawGlow(f.today, Math.max(6 * dpr, s * 5), pulse * 0.7);
+      this.drawGlow(f.today, Math.max(6 * dpr, glowCells(5, 1.1)), pulse * 0.7);
     }
 
     // Granos protagonistas cayendo
     for (const h of f.heroes) {
       const px = this.ox + h.x * s;
       const py = this.oy + h.y * s;
-      if (h.glow > 0.01) this.drawGlow(h, Math.max(9 * dpr, s * 7), h.glow);
+      if (h.glow > 0.01) this.drawGlow(h, Math.max(9 * dpr, glowCells(7, 1.4)), h.glow);
       ctx.fillStyle = h.color;
       ctx.beginPath();
-      ctx.arc(px, py, Math.max(1.6 * dpr, s * 0.9), 0, Math.PI * 2);
+      ctx.arc(px, py, this.grainRadius(), 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -312,7 +368,7 @@ export class Renderer {
       ctx.strokeStyle = theme.glow;
       ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath();
-      ctx.arc(px, py, Math.max(6 * dpr, s * 2.2), 0, Math.PI * 2);
+      ctx.arc(px, py, this.marbles ? s * 0.62 : Math.max(6 * dpr, s * 2.2), 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -325,7 +381,7 @@ export class Renderer {
    * mida unos 10 px, con el grano señalado recuadrado.
    */
   private drawLens(l: NonNullable<DrawFrame['lens']>): void {
-    const { ctx, dpr, s, theme, hg } = this;
+    const { ctx, dpr, s, theme } = this;
     const cx = l.x * dpr;
     const cy = l.y * dpr;
     const r = LENS_RADIUS * dpr;
@@ -348,8 +404,7 @@ export class Renderer {
     ctx.translate(-cx, -cy);
     ctx.fillStyle = theme.glassFill;
     ctx.fill(this.glass);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
+    this.drawSand(ctx);
     ctx.lineWidth = (1.5 * dpr) / zoom;
     ctx.strokeStyle = theme.glassEdge;
     ctx.stroke(this.glass);
