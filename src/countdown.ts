@@ -1,4 +1,4 @@
-import { civilFromDay, fallenCount, localDayNumber, weekday, type Life } from './dates';
+import { civilFromDay, localDayNumber, lowerBound, weekday } from './dates';
 
 /** "42 s", "12 min", "3 h 12 min", "2 d 5 h". */
 export function formatDuration(ms: number): string {
@@ -19,18 +19,19 @@ export function grainFallsAt(day: number): number {
   return new Date(c.year, c.month - 1, c.day).getTime();
 }
 
-/** Texto de la cuenta atrás hasta que caiga el próximo grano, o null si ya no quedan. */
-export function countdownText(life: Life, now: Date): string | null {
+/**
+ * Texto de la cuenta atrás hasta que caiga el próximo grano de días (uno por cada día del
+ * calendario), o null si ya no quedan.
+ */
+export function countdownText(days: Int32Array, now: Date): string | null {
   const today = localDayNumber(now);
-  const next = fallenCount(life, today);
-  if (next >= life.total) return null;
-  const day = life.workDays[next];
+  const next = lowerBound(days, today);
+  if (next >= days.length) return null;
+  const day = days[next];
   const left = formatDuration(grainFallsAt(day) - now.getTime());
-  if (day === today) {
-    return weekday(today) === 5 ? `¡Viernes! Tu grano de hoy cae en ${left}` : `Tu grano de hoy cae en ${left}`;
-  }
-  if (today < life.startDay) return `Tu primer grano cae en ${left}`;
+  if (day !== today) return `Tu primer grano cae en ${left}`;
   const wd = weekday(today);
-  const why = wd === 0 || wd === 6 ? 'Fin de semana' : 'Hoy es festivo';
-  return `${why}: hoy no cae ningún grano · el próximo, en ${left}`;
+  if (wd === 5) return `¡Viernes! Tu grano de hoy cae en ${left}`;
+  if (wd === 0 || wd === 6) return `Fin de semana · tu grano de hoy cae en ${left}`;
+  return `Tu grano de hoy cae en ${left}`;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLife, dayFromCivil, toIsoDate, weekday } from './dates';
+import { buildLife, dayFromCivil, fallenCount, toIsoDate, weekday } from './dates';
 import { milestonesFor } from './milestones';
 import { classifyGrain, grainPhrase, UNIT_PHRASES } from './phrases';
 import {
@@ -146,7 +146,8 @@ describe('segundos', () => {
   });
 
   it('segundos de trabajo hasta la jubilación', () => {
-    const days = life.total - fallenAtDay(buildGrains(life, cfg, 'dias'), dayFromCivil(2026, 10, 14));
+    // Días laborables que quedan desde hoy, miércoles, incluido.
+    const days = life.total - fallenCount(life, dayFromCivil(2026, 10, 14));
     const { left, total } = careerSeconds(life, J, wed);
     expect(left).toBe(days * 28_800 - 7200);
     expect(total).toBe(life.total * 28_800);
@@ -182,7 +183,7 @@ describe('hitos y frases de cada unidad', () => {
     expect(nom.some((m) => m.title === '¡250 nóminas cobradas!')).toBe(true);
     const yrs = milestonesFor(46, 'anios');
     expect(yrs.find((m) => m.id === 44)?.title).toBe('¡Solo te queda un año!');
-    expect(milestonesFor(11_000)[0].title).toBe('¡1000 días laborables trabajados!');
+    expect(milestonesFor(11_000)[0].title).toBe('¡1000 días de vida laboral!');
   });
 
   it('cada grano tiene frase, siempre la misma, y no se repiten entre grupos', () => {

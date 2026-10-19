@@ -36,12 +36,12 @@ interface UnitMilestones {
 
 const UNITS: Record<UnitId, UnitMilestones> = {
   dias: {
-    last: ['¡Jubilación! Se acabó la arena', 'Tu último día de trabajo', 'la jubilación'],
+    last: ['¡Jubilación! Se acabó la arena', 'Tu último día antes de jubilarte', 'la jubilación'],
     percents: PERCENTS,
     left: [1000, 500, 100, 10],
-    leftTexts: (n) => [`¡Solo quedan ${n} días laborables!`, `Quedan ${n} días laborables`, `los últimos ${n} días`],
+    leftTexts: (n) => [`¡Solo quedan ${n} días!`, `Quedan ${n} días`, `los últimos ${n} días`],
     done: [1000, 2500, 5000, 7500, 10_000, 12_500, 15_000, 20_000],
-    doneTexts: (n) => [`¡${n} días laborables trabajados!`, `${n} días laborables trabajados`, `los ${n} días trabajados`],
+    doneTexts: (n) => [`¡${n} días de vida laboral!`, `${n} días de vida laboral`, `los ${n} días de vida laboral`],
   },
   nominas: {
     last: ['¡La última nómina! Se acabó la arena', 'Tu última nómina', 'la última nómina'],

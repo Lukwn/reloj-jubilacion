@@ -1,7 +1,56 @@
-import { isInterior, type Hourglass } from './hourglass';
+import type { Hourglass } from './hourglass';
+
+/**
+ * Celda de arena: su centro cae dentro del vidrio dibujado (perfil + 0,6 de holgura, menos un
+ * poco de margen). Las del borde asoman algo y se recortan al dibujarlas, así la arena llega a la
+ * pared sin dejar huecos. El cuello es sólido.
+ */
+function sandInterior(hg: Hourglass, x: number, y: number): boolean {
+  if (y >= hg.topEnd && y < hg.bottomStart) return false;
+  return Math.abs(x + 0.5 - hg.W / 2) <= hg.half[y] + 0.5;
+}
 
 export const WALL = -1;
 export const EMPTY = 0;
+
+/**
+ * Lo que el resto de la app necesita de una simulación de granos: la arena por autómata
+ * celular (`SandSim`) o las canicas con física (`MarbleSim`). Las dos mantienen una rejilla
+ * de celdas con el id+1 de cada grano (en las canicas, la celda de su centro), para elegir
+ * granos, pasarlos por el cuello y posarlos.
+ */
+export interface GrainSim {
+  readonly hg: Hourglass;
+  readonly W: number;
+  readonly H: number;
+  readonly grainCount: number;
+  readonly grid: Int32Array;
+  readonly pos: Int32Array;
+  agitation: number;
+  tilt: number;
+  gravityAngle: number;
+  readonly fallAngle: number;
+  readonly activeCount: number;
+  readonly pendingActive: number;
+  readonly sorting: boolean;
+  step(): void;
+  wakeAll(): void;
+  pack(fallen: number): void;
+  put(id: number, idx: number, wake?: boolean): void;
+  take(id: number): void;
+  swapCells(a: number, b: number): void;
+  findNeckGrain(side?: 0 | 1): number;
+  findLandingCell(side?: 0 | 1): number;
+  dig(cx: number, cy: number, r: number, dx: number, dy: number): number;
+  startSort(): void;
+  sortStep(fraction: number): boolean;
+  stopSort(): void;
+  countRows(y0: number, y1: number): number;
+  /** Centro del grano en celdas (con decimales), o null si no está en el reloj. */
+  pointOf(id: number): { x: number; y: number } | null;
+  /** Grano más cercano a un punto, si la simulación lo sabe calcular mejor que la rejilla. */
+  nearest?(x: number, y: number, reach: number): number;
+}
 
 /**
  * Arena por autómata celular. Cada celda vale WALL, EMPTY o id+1 del grano que la ocupa,
@@ -9,7 +58,7 @@ export const EMPTY = 0;
  * Solo se procesan los granos activos; los que llevan varios pasos quietos se duermen
  * y los despierta un vecino que se mueve.
  */
-export class SandSim {
+export class SandSim implements GrainSim {
   readonly W: number;
   readonly H: number;
   readonly grid: Int32Array;
@@ -57,7 +106,7 @@ export class SandSim {
     this.H = hg.H;
     this.grid = new Int32Array(hg.W * hg.H).fill(WALL);
     for (let y = 0; y < hg.H; y++) {
-      for (let x = 0; x < hg.W; x++) if (isInterior(hg, x, y)) this.grid[y * hg.W + x] = EMPTY;
+      for (let x = 0; x < hg.W; x++) if (sandInterior(hg, x, y)) this.grid[y * hg.W + x] = EMPTY;
     }
     this.pos = new Int32Array(grainCount).fill(-1);
     this.cur = new Int32Array(grainCount);
@@ -115,7 +164,57 @@ export class SandSim {
     if (idx < 0) return;
     this.grid[idx] = EMPTY;
     this.pos[id] = -1;
-    this.wakeAround(idx);
+    // Del bulbo de arriba (por el cuello): baja toda la arena, no solo la columna de encima.
+    if (Math.floor(idx / this.W) < this.hg.topEnd && Math.abs(this.gravityAngle) < 0.35) this.flowDown(idx);
+    else this.wakeAround(idx);
+  }
+
+  /**
+   * Cuando sale un grano por el cuello, en un reloj de verdad no baja solo la columna de encima:
+   * como las paredes del bulbo están inclinadas, desciende toda la arena y la superficie se hunde
+   * apenas en el centro. Aquí, el hueco sube hasta lo más alto de la superficie y cada grano
+   * del camino baja un sitio. Sin esto, el autómata abre una chimenea en el centro y las capas de
+   * los lados no se mueven hasta el final.
+   */
+  private flowDown(start: number): void {
+    const { W } = this;
+    const g = this.grid;
+    const end = this.hg.topEnd;
+    // Destino: el grano de arriba del todo de una columna. De dos columnas al azar, la más alta
+    // (y, si empatan, la más cercana al centro): así baja toda la superficie y no se abre un
+    // cráter que siga hundiéndose por el centro.
+    let tx = -1;
+    let ty = end;
+    for (let k = 0; k < 2; k++) {
+      const x = Math.floor(this.rand() * W);
+      let y = 0;
+      while (y < end && g[y * W + x] <= 0) y++;
+      if (y >= end) continue;
+      if (y < ty || (y === ty && Math.abs(x + 0.5 - W / 2) < Math.abs(tx + 0.5 - W / 2))) {
+        tx = x;
+        ty = y;
+      }
+    }
+    const x0 = start % W;
+    const y0 = Math.floor(start / W);
+    if (tx < 0 || ty >= y0) {
+      this.wakeAround(start);
+      return;
+    }
+    // Camino recto del cuello al destino: cada grano del camino baja al sitio del anterior y el
+    // hueco acaba arriba, en la superficie. Los huecos que haya por medio se saltan.
+    let hole = start;
+    for (let y = y0 - 1; y >= ty; y--) {
+      const x = Math.round(x0 + ((tx - x0) * (y0 - y)) / (y0 - ty));
+      const c = y * W + x;
+      const v = g[c];
+      if (v <= 0) continue;
+      g[hole] = v;
+      this.pos[v - 1] = hole;
+      g[c] = EMPTY;
+      hole = c;
+    }
+    this.wakeAround(hole);
   }
 
   /** Intercambia la identidad de dos celdas ocupadas. */
@@ -505,6 +604,11 @@ export class SandSim {
       }
     }
     return -1;
+  }
+
+  pointOf(id: number): { x: number; y: number } | null {
+    const p = this.pos[id];
+    return p < 0 ? null : { x: (p % this.W) + 0.5, y: Math.floor(p / this.W) + 0.5 };
   }
 
   /** Número de granos en las filas [y0, y1). */

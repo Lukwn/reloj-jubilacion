@@ -30,12 +30,14 @@ describe('frases', () => {
     expect(classifyDay(dayFromCivil(2030, 3, 6), ctx)).toBe('generico');
   });
 
-  it('con días laborables, «año nuevo» es el primer día laborable del año', () => {
+  it('«año nuevo» es el 1 de enero y los festivos entre semana tienen sus frases', () => {
     const isWorkday = workdayChecker({ holyThursday: true, easterMonday: false, extra: '' });
     const c = { ...ctx, isWorkday };
-    expect(classifyDay(dayFromCivil(2030, 1, 2), c)).toBe('anioNuevo'); // miércoles
-    expect(classifyDay(dayFromCivil(2030, 1, 3), c)).not.toBe('anioNuevo');
-    expect(classifyDay(dayFromCivil(2031, 1, 2), c)).toBe('anioNuevo'); // jueves
+    expect(classifyDay(dayFromCivil(2030, 1, 1), c)).toBe('anioNuevo');
+    expect(classifyDay(dayFromCivil(2030, 1, 2), c)).not.toBe('anioNuevo');
+    expect(classifyDay(dayFromCivil(2030, 10, 14), c)).toBe('lunes'); // lunes laborable
+    expect(classifyDay(dayFromCivil(2030, 5, 1), c)).toBe('festivo'); // miércoles, Fiesta del Trabajo
+    expect(classifyDay(dayFromCivil(2030, 5, 4), c)).toBe('finde'); // sábado
   });
 
   it('un 29 de febrero celebra el cumpleaños el 28 en años no bisiestos', () => {

@@ -1,4 +1,4 @@
-import { civilFromDay, dayFromCivil, isLeapYear, weekday } from './dates';
+import { civilFromDay, isLeapYear, weekday } from './dates';
 import { workedSecondOfDay, type GrainSet } from './units';
 
 export type PhraseGroup =
@@ -8,6 +8,7 @@ export type PhraseGroup =
   | 'anioNuevo'
   | 'navidad'
   | 'finde'
+  | 'festivo'
   | 'agosto'
   | 'lunes'
   | 'viernes'
@@ -44,6 +45,14 @@ export const PHRASES: Record<PhraseGroup, readonly string[]> = {
     'Siesta con la cámara apagada, como en las reuniones, pero legal.',
     'Llega un correo del cliente con «URGENTE» en el asunto. Será urgente el lunes.',
   ],
+  festivo: [
+    'Festivo entre semana. El correo puede esperar. Tú también.',
+    'Hoy no hay daily. Te descubres a las 9:15 esperando a que empiece igual.',
+    'Festivo: el día perfecto para no mirar Teams. Lo mirarás dos veces.',
+    'Puente a la vista. Alguien ya ha bloqueado el viernes en el calendario.',
+    'Día festivo. Hasta el servidor de producción parece más tranquilo.',
+    'Festivo. Tu jefe te escribirá «sin prisa, para mañana». Hay prisa.',
+  ],
   agosto: [
     'La oficina está vacía y el aire acondicionado, a 17 grados.',
     'Respuesta automática: «Fuera hasta septiembre (emocionalmente, hasta octubre)».',
@@ -61,11 +70,11 @@ export const PHRASES: Record<PhraseGroup, readonly string[]> = {
     'Todo el mundo de vacaciones menos el servidor de producción.',
   ],
   anioNuevo: [
-    'Primer día laborable del año. Propósito: imputar las horas el mismo día. Duración estimada: 4 días.',
-    'Primer día laborable del año. Año nuevo, mismo Excel de seguimiento.',
-    'Primer día laborable del año. 200 correos de «¡Feliz año!» y uno importante escondido entre ellos.',
-    'Primer día laborable del año. El calendario está en blanco. Por poco tiempo.',
-    'Primer día laborable del año. Nuevo año fiscal, nuevo organigrama, mismos problemas.',
+    'Año nuevo. Propósito: imputar las horas el mismo día. Duración estimada: 4 días.',
+    'Año nuevo, mismo Excel de seguimiento.',
+    'Año nuevo. Mañana te esperan 200 correos de «¡Feliz año!» y uno importante escondido entre ellos.',
+    'Año nuevo. El calendario está en blanco. Por poco tiempo.',
+    'Año nuevo. Nuevo año fiscal, nuevo organigrama, mismos problemas.',
   ],
   cumple: [
     'Tu cumpleaños. Tarta en la oficina a las 11 y una reunión a las 11:05.',
@@ -113,14 +122,8 @@ export interface PhraseContext {
   today: number;
   birthDay: number;
   lastDay: number;
-  /** Si se indica, «año nuevo» es el primer día laborable del año en vez del 1 de enero. */
+  /** Si se indica, los festivos entre semana tienen sus propias frases. */
   isWorkday?: (day: number) => boolean;
-}
-
-function isFirstWorkdayOfYear(day: number, isWorkday: (day: number) => boolean): boolean {
-  const { year } = civilFromDay(day);
-  for (let d = dayFromCivil(year, 1, 1); d < day; d++) if (isWorkday(d)) return false;
-  return isWorkday(day);
 }
 
 function isBirthday(day: number, birthDay: number): boolean {
@@ -135,12 +138,11 @@ export function classifyDay(day: number, ctx: PhraseContext): PhraseGroup {
   if (day < ctx.today) return 'pasado';
   if (isBirthday(day, ctx.birthDay)) return 'cumple';
   const { month, day: dom } = civilFromDay(day);
-  if (ctx.isWorkday ? month === 1 && isFirstWorkdayOfYear(day, ctx.isWorkday) : month === 1 && dom === 1) {
-    return 'anioNuevo';
-  }
+  if (month === 1 && dom === 1) return 'anioNuevo';
   if (month === 12 && dom >= 24) return 'navidad';
   const wd = weekday(day);
   if (wd === 0 || wd === 6) return 'finde';
+  if (ctx.isWorkday && !ctx.isWorkday(day)) return 'festivo';
   if (month === 8) return 'agosto';
   if (wd === 1) return 'lunes';
   if (wd === 5) return 'viernes';

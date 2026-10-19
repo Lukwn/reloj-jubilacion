@@ -11,10 +11,11 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 
 /**
  * Color de cada grano empaquetado como píxel RGBA (little-endian) para ImageData.
- * Variación aleatoria pero estable por grano. En días, los lunes algo más tostados y los
- * viernes más dorados; en nóminas, las pagas extra doradas.
+ * Variación aleatoria pero estable por grano. En días, los lunes algo más tostados, los
+ * viernes más dorados y los fines de semana y festivos más claros; en nóminas, las pagas
+ * extra doradas.
  */
-export function grainColors(set: GrainSet, seed: number): Uint32Array {
+export function grainColors(set: GrainSet, seed: number, isWorkday?: (day: number) => boolean): Uint32Array {
   const out = new Uint32Array(set.total);
   for (let id = 0; id < set.total; id++) {
     const r = hash32(id * 7919 + seed);
@@ -24,15 +25,26 @@ export function grainColors(set: GrainSet, seed: number): Uint32Array {
     let h = 38 + j1 * 8;
     let s = 0.55 + j2 * 0.16;
     let l = 0.64 + j3 * 0.16;
+    // En días, los tonos de la semana son sutiles, del orden de la variación al azar de cada grano:
+    // se repiten cada siete granos y, como se colocan seguidos, más contraste dibujaría arcos
+    // (moiré) en la arena.
     const wd = set.unit === 'dias' ? weekday(set.days[id]) : -1;
     if (wd === 1) {
-      h -= 9;
-      s -= 0.06;
-      l -= 0.07;
-    } else if (wd === 5 || set.extra?.[id]) {
+      h -= 4;
+      l -= 0.025;
+    } else if (wd === 5) {
+      h += 3;
+      s += 0.05;
+      l += 0.015;
+    } else if (set.extra?.[id]) {
+      // Las pagas extra sí destacan: son pocas y no siguen un ritmo fijo entre las canicas.
       h += 6;
-      s += 0.12 + (set.extra?.[id] ? 0.15 : 0);
+      s += 0.27;
       l += 0.04;
+    }
+    if (wd >= 0 && isWorkday && !isWorkday(set.days[id])) {
+      s -= 0.04;
+      l += 0.02;
     }
     const [R, G, B] = hslToRgb(h, s, l);
     out[id] = ((255 << 24) | (B << 16) | (G << 8) | R) >>> 0;

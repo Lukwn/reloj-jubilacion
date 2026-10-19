@@ -14,6 +14,8 @@
   --cap: #262b38;
   --cap-edge: #3a4253;
   --glow: rgba(255, 210, 130, 0.95);
+  --shadow: rgba(0, 0, 0, 0.55);
+  --ambient: rgba(226, 183, 108, 0.1);
 }
 
 @media (prefers-color-scheme: light) {
@@ -32,5 +34,7 @@
     --cap: #5c4b3b;
     --cap-edge: #3e3226;
     --glow: rgba(214, 140, 30, 0.9);
+    --shadow: rgba(70, 45, 20, 0.32);
+    --ambient: rgba(255, 236, 200, 0.55);
   }
 }

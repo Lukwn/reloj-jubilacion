@@ -1,4 +1,4 @@
-import { EMPTY, type SandSim } from './sim';
+import { EMPTY, type GrainSim } from './sim';
 
 /**
  * Grano que cruza el cuello y cae por el bulbo inferior, fuera de la rejilla, hasta posarse.
@@ -39,7 +39,7 @@ export function neckOpen(angle: number): boolean {
  *   con el vidrio o con el cuello.
  * Devuelve la celda donde se posa, o -1 si sigue en el aire.
  */
-export function advanceFall(g: FallingGrain, sim: SandSim, angle: number, dt: number): number {
+export function advanceFall(g: FallingGrain, sim: GrainSim, angle: number, dt: number): number {
   const { W, H, bottomStart } = sim.hg;
   const gx = Math.sin(angle);
   const gy = Math.cos(angle);

@@ -1,5 +1,5 @@
 // Unidades de tiempo del reloj. Cada grano es un periodo que cae cuando termina:
-// - días laborables: a medianoche;
+// - días (naturales, todos los del calendario, como cuenta la vida laboral): a medianoche;
 // - nóminas: al terminar el día de cobro (el último día laborable del mes);
 // - años: en Nochevieja;
 // - segundos: el reloj muestra solo la jornada de hoy y cae un grano por segundo trabajado.
@@ -38,7 +38,7 @@ export interface UnitNames {
 }
 
 export const UNIT_NAMES: Record<UnitId, UnitNames> = {
-  dias: { one: 'día laborable', many: 'días laborables', label: 'Días', grain: 'un día laborable', done: 'trabajados' },
+  dias: { one: 'día', many: 'días', label: 'Días', grain: 'un día de tu vida laboral', done: 'pasados' },
   segundos: {
     one: 'segundo de trabajo',
     many: 'segundos de trabajo',
@@ -150,7 +150,13 @@ export interface GrainSet {
 
 export function buildGrains(life: Life, cfg: LifeConfig, unit: UnitId, now: Date = new Date()): GrainSet {
   const base = { unit, extra: null, window: null };
-  if (unit === 'dias') return { ...base, total: life.total, days: life.workDays };
+  if (unit === 'dias') {
+    // Todos los días del calendario, del inicio de la vida laboral a la víspera de la jubilación.
+    const total = life.retireDay - life.startDay;
+    const days = new Int32Array(total);
+    for (let i = 0; i < total; i++) days[i] = life.startDay + i;
+    return { ...base, total, days };
+  }
 
   if (unit === 'segundos') {
     const jornada = jornadaFor(cfg);
@@ -250,14 +256,11 @@ export function grainWhen(set: GrainSet, life: Life, id: number, target: number,
   const day = set.days[id];
   switch (set.unit) {
     case 'dias': {
-      if (day === today) return 'Hoy';
-      // target es el primer grano de hoy en adelante: hoy si es laborable, si no el siguiente.
-      if (id >= target) {
-        const n = id - target + (life.isWorkday(today) ? 0 : 1);
-        return n === 1 ? 'El próximo día laborable' : `Dentro de ${formatInt(n)} días laborables`;
-      }
-      const n = target - id;
-      return n === 1 ? 'El último día laborable' : `Hace ${formatInt(n)} días laborables`;
+      const n = day - today;
+      if (n === 0) return 'Hoy';
+      if (n === 1) return 'Mañana';
+      if (n === -1) return 'Ayer';
+      return n > 0 ? `Dentro de ${formatInt(n)} días` : `Hace ${formatInt(-n)} días`;
     }
     case 'nominas': {
       const cobro = `se cobra el ${lowerFirst(formatDayLong(day))}`;
@@ -293,7 +296,7 @@ export function grainWhen(set: GrainSet, life: Life, id: number, target: number,
 
 /** La línea de cuenta atrás bajo el contador, según la unidad. */
 export function unitCountdown(set: GrainSet, life: Life, now: Date): string | null {
-  if (set.unit === 'dias') return countdownText(life, now);
+  if (set.unit === 'dias') return countdownText(set.days, now);
   const next = fallenAt(set, now);
   if (next >= set.total) return set.unit === 'segundos' ? jornadaDone(set, life, now) : null;
   const left = formatDuration(fallsAt(set, next) - now.getTime());

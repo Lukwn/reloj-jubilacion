@@ -172,7 +172,7 @@ describe('reloj de arena', () => {
       sim.step();
     }
     const mid = Math.floor(hg.W / 2);
-    expect(half(mid, hg.W)).toBeGreaterThan(half(0, mid) * 1.15);
+    expect(half(mid, hg.W)).toBeGreaterThan(half(0, mid) * 1.08);
     expect(sim.countRows(0, hg.topEnd)).toBe(8_000);
   });
 

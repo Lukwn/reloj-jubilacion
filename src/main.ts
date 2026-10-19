@@ -31,7 +31,8 @@ import {
   type UnitId,
 } from './units';
 import { designHourglass, type Hourglass } from './hourglass';
-import { EMPTY, SandSim } from './sim';
+import { EMPTY, SandSim, type GrainSim } from './sim';
+import { MarbleSim } from './marbles';
 import { LENS_RADIUS, Renderer, type HeroDraw, type Point } from './render';
 import { advanceFall, neckOpen, startFall, type FallingGrain } from './falling';
 import { motionImpulse, type ShakeImpulse } from './shake';
@@ -125,7 +126,7 @@ interface World {
   /** Los granos de la unidad: días, segundos de la jornada, nóminas o años. */
   grains: GrainSet;
   hg: Hourglass;
-  sim: SandSim;
+  sim: GrainSim;
   /** Paleta activa: la arena normal o las capas por años. */
   colors: Uint32Array;
   sandColors: Uint32Array;
@@ -169,6 +170,8 @@ let unit: UnitId = loadUnit();
  */
 function lifeKey(cfg: LifeConfig, u: UnitId): string {
   const key: unknown[] = [cfg.workStartDate, cfg.holyThursday ?? true, cfg.easterMonday ?? false, (cfg.extraHolidays ?? '').trim()];
+  // Los días eran laborables y ahora son naturales: lo guardado con la versión anterior no vale.
+  if (u === 'dias') key.push('naturales');
   if (u === 'nominas') key.push(cfg.pagas === 12 ? 12 : 14);
   return JSON.stringify(key);
 }
@@ -190,9 +193,10 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   const shown = shownOverride ?? (live ? target : sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
 
   const hg = designHourglass(grains.total);
-  const sim = new SandSim(hg, grains.total);
+  // Con pocos granos (nóminas, años), canicas con física de verdad; con muchos, arena.
+  const sim: GrainSim = grains.total <= MARBLE_MAX ? new MarbleSim(hg, grains.total) : new SandSim(hg, grains.total);
   sim.pack(shown);
-  const sandColors = grainColors(grains, life.startDay);
+  const sandColors = grainColors(grains, life.startDay, life.isWorkday);
   const layers = yearLayers(grains, life.startDay);
   const renderer = new Renderer(canvas, hg, sim, sandColors);
   if (topExtra) {
@@ -269,6 +273,9 @@ function scheduleMidnight(): void {
 
 // ---------------------------------------------------------------- caída de granos
 
+/** Hasta cuántos granos se dibujan como canicas con física (nóminas y años caben de sobra). */
+const MARBLE_MAX = 2000;
+
 function cellPoint(w: World, idx: number): Point {
   return { x: (idx % w.hg.W) + 0.5, y: Math.floor(idx / w.hg.W) + 0.5 };
 }
@@ -281,7 +288,7 @@ function spawnHero(w: World, now: number, glowMs: number, fallMs: number, bright
   // El grano más cercano al cuello adopta la identidad del día que toca.
   const neck = sim.findNeckGrain();
   if (neck >= 0 && neck !== sim.pos[id]) sim.swapCells(neck, sim.pos[id]);
-  const from = cellPoint(w, sim.pos[id]);
+  const from = sim.pointOf(id)!;
   sim.take(id);
   w.nextDrop++;
   // Altura de una caída en vertical, para ajustar la gravedad a la duración prevista. El sitio
@@ -514,10 +521,11 @@ function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number
   // Con el dedo, los hitos que brillan son más fáciles de tocar. Con el ratón (y la lupa)
   // manda el grano que hay justo debajo.
   for (const m of touch ? w.milestones : []) {
-    if (m.id < w.landed || sim.pos[m.id] < 0) continue;
-    const p = cellPoint(w, sim.pos[m.id]);
-    if (Math.hypot(p.x - g.x, p.y - g.y) <= reach * 2) return m.id;
+    const p = m.id < w.landed ? null : sim.pointOf(m.id);
+    if (p && Math.hypot(p.x - g.x, p.y - g.y) <= reach * 2) return m.id;
   }
+  // Las canicas saben exactamente dónde está cada una.
+  if (sim.nearest) return sim.nearest(g.x, g.y, touch ? 1 : 0.5);
   const r = Math.ceil(reach);
   const gx = Math.floor(g.x);
   const gy = Math.floor(g.y);
@@ -545,7 +553,7 @@ function showTooltip(w: World, id: number, cssX: number, cssY: number): void {
   tooltipPhrase.textContent = grainPhrase(w.grains, id, {
     today: w.today,
     birthDay: w.life.birthDay,
-    lastDay: w.life.lastDay,
+    lastDay: w.grains.days[w.grains.total - 1],
     isWorkday: w.life.isWorkday,
     target: w.target,
   });
@@ -862,12 +870,13 @@ function updateCounter(): void {
     counterEl.textContent = '';
     return;
   }
-  const { remaining, fraction } = remainingNow(w);
+  const { remaining, done, fraction } = remainingNow(w);
   const pct = formatPercent(fraction);
+  // Lo que queda y lo que ya llevas, en la unidad del reloj.
   const text =
     remaining <= 0
-      ? `0 ${UNIT_NAMES[w.unit].many} · ${pct} completado · ¡Jubilación!`
-      : `${unitPlural(remaining, w.unit)} · ${pct} completado`;
+      ? `¡Jubilación! · llevas ${formatInt(done)} · ${pct}`
+      : `${remaining === 1 ? 'Queda' : 'Quedan'} ${unitPlural(remaining, w.unit)} · llevas ${formatInt(done)} · ${pct}`;
   if (counterEl.textContent !== text) counterEl.textContent = text;
 }
 
@@ -875,12 +884,12 @@ function updateCounter(): void {
  * Lo que queda hasta la jubilación en la unidad del reloj. En segundos se cuentan los de toda
  * la vida laboral (el reloj solo muestra la jornada de hoy); en las demás, los granos de arriba.
  */
-function remainingNow(w: World): { remaining: number; fraction: number } {
+function remainingNow(w: World): { remaining: number; done: number; fraction: number } {
   if (w.unit === 'segundos') {
     const { left, total } = careerSeconds(w.life, w.grains.window!.jornada, new Date());
-    return { remaining: left, fraction: 1 - left / total };
+    return { remaining: left, done: total - left, fraction: 1 - left / total };
   }
-  return { remaining: w.grains.total - w.landed, fraction: w.landed / w.grains.total };
+  return { remaining: w.grains.total - w.landed, done: w.landed, fraction: w.landed / w.grains.total };
 }
 
 // ---------------------------------------------------------------- ajustes
@@ -977,8 +986,8 @@ function milestoneMarks(w: World): Point[] {
   for (const m of w.milestones) {
     if (m.id < w.landed) continue;
     if (out.length === 3) break;
-    const p = w.sim.pos[m.id];
-    if (p >= 0) out.push(cellPoint(w, p));
+    const p = w.sim.pointOf(m.id);
+    if (p) out.push(p);
   }
   return out;
 }
@@ -1244,7 +1253,7 @@ function updatePlayControls(): void {
   playSpeedLabel.textContent = SPEEDS[speedIdx][1];
 }
 
-/** Avanza el día reproducido y deja que caigan los granos de los días laborables que terminan. */
+/** Avanza el día reproducido y deja que caigan los granos de los periodos que terminan. */
 function updatePlay(w: World, now: number): void {
   if (!play) return;
   // Si la pestaña estuvo sin fotogramas, no se saltan años de golpe.
@@ -1370,15 +1379,13 @@ function tick(now: number): void {
   });
 
   let today: Point | null = null;
-  if (w.unit !== 'segundos' && w.target < w.grains.total && w.nextDrop === w.target && w.sim.pos[w.target] >= 0) {
-    today = cellPoint(w, w.sim.pos[w.target]);
-  }
+  if (w.unit !== 'segundos' && w.target < w.grains.total && w.nextDrop === w.target) today = w.sim.pointOf(w.target);
 
   let selected: Point | null = null;
   if (selectedId >= 0) {
     const hero = w.heroes.find((h) => h.id === selectedId);
     if (hero) selected = heroPoint(hero);
-    else if (sim.pos[selectedId] >= 0) selected = cellPoint(w, sim.pos[selectedId]);
+    else selected = sim.pointOf(selectedId);
   }
 
   let highlight = -1;
@@ -1389,8 +1396,7 @@ function tick(now: number): void {
 
   let lensFrame = null;
   if (lens) {
-    const at = lens.id >= 0 ? w.sim.pos[lens.id] : -1;
-    lensFrame = { x: lens.x, y: lens.y, grain: at >= 0 ? cellPoint(w, at) : null };
+    lensFrame = { x: lens.x, y: lens.y, grain: lens.id >= 0 ? w.sim.pointOf(lens.id) : null };
   }
   canvas.classList.toggle('con-lupa', !!lens);
 
@@ -1428,7 +1434,7 @@ window.setInterval(checkDay, 60_000);
 window.setInterval(updateCountdown, 1000);
 window.addEventListener('pagehide', () => world && persistProgress(world));
 if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
-  hintEl.textContent = 'Cada grano es un día laborable · pasa el ratón por la arena para verla con lupa · arrastra para inclinar el reloj · doble clic para darle la vuelta';
+  hintEl.textContent = `Cada grano es ${UNIT_NAMES[unit].grain} · pasa el ratón por la arena para verla con lupa · arrastra para inclinar el reloj · doble clic para darle la vuelta`;
 }
 window.setTimeout(() => hintEl.classList.add('oculta'), 10_000);
 
