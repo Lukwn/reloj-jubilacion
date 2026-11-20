@@ -32,8 +32,9 @@ import {
 } from './units';
 import { designHourglass, type Hourglass } from './hourglass';
 import { EMPTY, SandSim, type GrainSim } from './sim';
-import { MarbleSim } from './marbles';
 import { LENS_RADIUS, Renderer, type HeroDraw, type Point } from './render';
+import { CoinsView, type AltFrame } from './coins';
+import { TreeView } from './tree';
 import { advanceFall, neckOpen, startFall, type FallingGrain } from './falling';
 import { motionImpulse, type ShakeImpulse } from './shake';
 import { dimColors, grainColors, unpackColor, yearLayers, type YearLayers } from './colors';
@@ -125,8 +126,10 @@ interface World {
   unit: UnitId;
   /** Los granos de la unidad: días, segundos de la jornada, nóminas o años. */
   grains: GrainSet;
-  hg: Hourglass;
-  sim: GrainSim;
+  hg: Hourglass | null;
+  sim: GrainSim | null;
+  /** Vista dedicada para unidades con pocas instancias (monedas 8-bits en nóminas, anillos de árbol en años). */
+  altView: CoinsView | TreeView | null;
   /** Paleta activa: la arena normal o las capas por años. */
   colors: Uint32Array;
   sandColors: Uint32Array;
@@ -140,11 +143,11 @@ interface World {
   seenUpTo: number;
   /** Hito alcanzado que se celebrará cuando termine de caer la arena. */
   pendingMilestone: Milestone | null;
-  renderer: Renderer;
+  renderer: Renderer | null;
   today: number;
   /** Granos que deberían haber caído según la fecha de hoy. */
   target: number;
-  /** Granos ya posados en el bulbo inferior. */
+  /** Granos ya posados en el bulbo inferior (o monedas/anillos completados). */
   landed: number;
   /** Siguiente grano que saldrá por el cuello. */
   nextDrop: number;
@@ -155,6 +158,8 @@ interface World {
 
 let world: World | null = null;
 let selectedId = -1;
+/** Elemento bajo el ratón en las vistas alternativas (monedas / árbol), o -1. */
+let hoverAltId = -1;
 let layersOn = loadLayers();
 /** Año bajo el ratón en el modo de capas, o -1. */
 let hoverYear = -1;
@@ -192,17 +197,40 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   // vividos caen delante de ti. Si vuelves tras unos días, caen solo los pendientes.
   const shown = shownOverride ?? (live ? target : sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
 
-  const hg = designHourglass(grains.total);
-  // Con pocos granos (nóminas, años), canicas con física de verdad; con muchos, arena.
-  const sim: GrainSim = grains.total <= MARBLE_MAX ? new MarbleSim(hg, grains.total) : new SandSim(hg, grains.total);
-  sim.pack(shown);
   const sandColors = grainColors(grains, life.startDay, life.isWorkday);
   const layers = yearLayers(grains, life.startDay);
-  const renderer = new Renderer(canvas, hg, sim, sandColors);
-  if (topExtra) {
-    renderer.topExtra = topExtra;
-    renderer.resize();
+
+  let hg: Hourglass | null = null;
+  let sim: GrainSim | null = null;
+  let renderer: Renderer | null = null;
+  let altView: CoinsView | TreeView | null = null;
+
+  if (unit === 'nominas') {
+    const coins = new CoinsView(canvas, grains, shown);
+    coins.onClink = (extra, strength) => sound.coin(extra, strength);
+    coins.onMessyChange = () => updateSortButton();
+    altView = coins;
+    if (topExtra) {
+      altView.topExtra = topExtra;
+      altView.resize();
+    }
+  } else if (unit === 'anios') {
+    altView = new TreeView(canvas, grains, shown, life.startDay);
+    if (topExtra) {
+      altView.topExtra = topExtra;
+      altView.resize();
+    }
+  } else {
+    hg = designHourglass(grains.total);
+    sim = new SandSim(hg, grains.total);
+    sim.pack(shown);
+    renderer = new Renderer(canvas, hg, sim, sandColors);
+    if (topExtra) {
+      renderer.topExtra = topExtra;
+      renderer.resize();
+    }
   }
+
   const milestones = milestonesFor(grains.total, unit);
   // La primera vez, los hitos ya pasados no se celebran (caerían todos de golpe).
   const seen = live ? null : loadMilestonesSeen(unit);
@@ -214,6 +242,7 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
     grains,
     hg,
     sim,
+    altView,
     colors: sandColors,
     sandColors,
     sandDim: dimColors(sandColors),
@@ -229,12 +258,20 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
     landed: shown,
     nextDrop: shown,
     heroes: [],
-    nextSpawnAt: performance.now() + 800,
+    nextSpawnAt: performance.now() + 500,
     catchUpInterval: 0,
   };
+  canvas.classList.toggle('vista-alt', !!altView);
+  canvas.classList.remove('moneda-cogible');
+  updateSortButton();
+  viewAngle = 0;
+  tiltTarget = 0;
+  tilting = false;
+  spinStart = -1;
   applyPalette(world);
   endSort();
   selectedId = -1;
+  hoverAltId = -1;
   hideTooltip();
   persistProgress(world);
   updateCounter();
@@ -273,16 +310,15 @@ function scheduleMidnight(): void {
 
 // ---------------------------------------------------------------- caída de granos
 
-/** Hasta cuántos granos se dibujan como canicas con física (nóminas y años caben de sobra). */
-const MARBLE_MAX = 2000;
-
 function cellPoint(w: World, idx: number): Point {
-  return { x: (idx % w.hg.W) + 0.5, y: Math.floor(idx / w.hg.W) + 0.5 };
+  const W = w.hg!.W;
+  return { x: (idx % W) + 0.5, y: Math.floor(idx / W) + 0.5 };
 }
 
 /** Saca por el cuello el siguiente grano. El cuello nunca deja pasar otro. */
 function spawnHero(w: World, now: number, glowMs: number, fallMs: number, bright: number): Hero | null {
-  const { sim } = w;
+  const { sim, hg } = w;
+  if (!sim || !hg) return null;
   const id = w.nextDrop;
   if (sim.pos[id] < 0) return null;
   // El grano más cercano al cuello adopta la identidad del día que toca.
@@ -291,12 +327,9 @@ function spawnHero(w: World, now: number, glowMs: number, fallMs: number, bright
   const from = sim.pointOf(id)!;
   sim.take(id);
   w.nextDrop++;
-  // Altura de una caída en vertical, para ajustar la gravedad a la duración prevista. El sitio
-  // real donde se posa sale de la propia caída, según hacia dónde tire la gravedad.
   const landing = sim.findLandingCell(0);
-  const toY = landing >= 0 ? cellPoint(w, landing).y : w.hg.H - 1;
-  // Baja por una de las dos columnas centrales, alternando, para no ladear la arena.
-  const lane = w.hg.W / 2 - 0.5 + (id & 1);
+  const toY = landing >= 0 ? cellPoint(w, landing).y : hg.H - 1;
+  const lane = hg.W / 2 - 0.5 + (id & 1);
   const start = now + glowMs;
   const fall = startFall(from.x, from.y, toY - from.y, fallMs, lane);
   const hero: Hero = { id, t0: now, glowMs, fallMs, last: start, fall, bright };
@@ -306,23 +339,21 @@ function spawnHero(w: World, now: number, glowMs: number, fallMs: number, bright
 
 /** Posa el grano en la celda donde ha chocado (o, si ya no está libre, en la cima del montón). */
 function landHero(w: World, h: Hero, cell = -1): void {
-  const idx = cell >= 0 && w.sim.grid[cell] === EMPTY ? cell : w.sim.findLandingCell();
-  if (idx >= 0) w.sim.put(h.id, idx);
+  const sim = w.sim;
+  if (!sim) return;
+  const idx = cell >= 0 && sim.grid[cell] === EMPTY ? cell : sim.findLandingCell();
+  if (idx >= 0) sim.put(h.id, idx);
   w.landed++;
   const m = w.milestoneById.get(h.id);
-  // Reproduciendo, cada hito se celebra al momento (y no cuenta como visto de verdad).
-  // (A gran velocidad caen varios por fotograma: solo cuenta un hito posterior al último celebrado.)
   if (m && play) {
     if (m.id > play.celebrated) {
       play.celebrated = m.id;
       celebrate(w, m);
     }
-  }
-  else if (m && h.id >= w.seenUpTo) w.pendingMilestone = m;
+  } else if (m && h.id >= w.seenUpTo) w.pendingMilestone = m;
   if (w.landed > w.seenUpTo) w.seenUpTo = w.landed;
   if (h.bright >= 1) sound.tink();
   else if (play && SPEEDS[speedIdx][0] <= 7) sound.tink(0.45);
-  // Durante una recuperación larga no hace falta guardar en cada grano.
   if (w.heroes.length === 0 || w.landed % 50 === 0) persistProgress(w);
   updateCounter();
 }
@@ -333,16 +364,16 @@ function heroPoint(h: Hero): Point {
 
 /** Mueve los granos que caen con la gravedad actual y posa los que han chocado. */
 function updateHeroes(w: World, now: number): void {
-  const angle = w.sim.fallAngle;
+  const sim = w.sim;
+  if (!sim) return;
+  const angle = sim.fallAngle;
   for (let i = w.heroes.length - 1; i >= 0; i--) {
     const h = w.heroes[i];
     const start = h.t0 + h.glowMs;
     if (now <= start) continue;
-    // Tras un rato sin fotogramas, no se da un salto enorme de golpe.
     const dt = Math.min(50, now - Math.max(h.last, start));
     h.last = now;
-    const cell = advanceFall(h.fall, w.sim, angle, dt);
-    // Por si acaso: ningún grano se queda en el aire para siempre.
+    const cell = advanceFall(h.fall, sim, angle, dt);
     const stuck = cell < 0 && now - start > h.fallMs * 6 + 4000;
     if (cell < 0 && !stuck) continue;
     w.heroes.splice(i, 1);
@@ -352,10 +383,72 @@ function updateHeroes(w: World, now: number): void {
 
 /** ¿Pasa la arena por el cuello? No si el reloj (o el móvil) está tumbado o boca abajo. */
 function neckFlows(w: World): boolean {
-  return neckOpen(w.sim.fallAngle);
+  return !w.sim || neckOpen(w.sim.fallAngle);
+}
+
+/** Avanza una o varias unidades en las vistas alternativas (monedas 8-bits de nóminas y anillos de árbol de años). */
+function advanceAltUnit(w: World, nextCount: number, now: number): void {
+  const prev = w.landed;
+  if (nextCount <= prev) return;
+  w.landed = Math.min(w.grains.total, nextCount);
+  w.nextDrop = w.landed;
+  if (w.altView instanceof CoinsView) {
+    w.altView.notifyLanded(w.landed, now, reducedMotion);
+  } else if (w.altView instanceof TreeView) {
+    w.altView.notifyLanded(w.landed, reducedMotion);
+    if (!play || SPEEDS[speedIdx][0] <= 365.25) sound.wood(w.landed - prev > 1 ? 0.6 : 0.95);
+  }
+  for (let id = prev; id < w.landed; id++) {
+    const m = w.milestoneById.get(id);
+    if (m && play) {
+      if (m.id > play.celebrated) {
+        play.celebrated = m.id;
+        celebrate(w, m);
+      }
+    } else if (m && id >= w.seenUpTo) {
+      w.pendingMilestone = m;
+    }
+  }
+  if (w.landed > w.seenUpTo) w.seenUpTo = w.landed;
+  if (w.landed >= w.target || w.landed % 20 === 0) persistProgress(w);
+  updateCounter();
 }
 
 function updateDrops(w: World, now: number): void {
+  // Vistas alternativas (pilas de monedas 8-bits y anillos de árbol): 100 % sincronizadas con el calendario y el slider.
+  if (w.altView) {
+    const backlog = w.target - w.landed;
+    if (!play && w.pendingMilestone && backlog <= 0) {
+      celebrate(w, w.pendingMilestone);
+      w.pendingMilestone = null;
+      persistProgress(w);
+    }
+    if (backlog <= 0) {
+      w.catchUpInterval = 0;
+      return;
+    }
+    if (play || reducedMotion) {
+      advanceAltUnit(w, w.target, now);
+      return;
+    }
+    if (now < w.nextSpawnAt) return;
+    if (backlog > 1) {
+      if (w.catchUpInterval === 0) w.catchUpInterval = Math.min(220, 3000 / backlog);
+      if (now - w.nextSpawnAt > 250) w.nextSpawnAt = now;
+      let step = 0;
+      while (now >= w.nextSpawnAt && w.landed + step < w.target && step < 40) {
+        step++;
+        w.nextSpawnAt += w.catchUpInterval;
+      }
+      if (w.nextSpawnAt < now) w.nextSpawnAt = now;
+      if (step > 0) advanceAltUnit(w, w.landed + step, now);
+      return;
+    }
+    advanceAltUnit(w, w.landed + 1, now);
+    w.nextSpawnAt = now + 400;
+    return;
+  }
+
   updateHeroes(w, now);
 
   if (play) {
@@ -420,14 +513,14 @@ function updateDrops(w: World, now: number): void {
 
 /** Mantiene el grano de hoy en la boca del cuello mientras la arena está quieta. */
 function keepTodayAtNeck(w: World): void {
+  const sim = w.sim;
   const id = w.target;
-  // En segundos no hay un «grano de hoy»: caen sin parar.
-  if (w.unit === 'segundos' || id >= w.grains.total || w.nextDrop !== w.target || w.sim.agitation > 0) return;
-  const at = w.sim.pos[id];
+  // En segundos y vistas alternativas no hay un grano esperando en el cuello.
+  if (!sim || w.unit === 'segundos' || id >= w.grains.total || w.nextDrop !== w.target || sim.agitation > 0) return;
+  const at = sim.pos[id];
   if (at < 0) return;
-  // Siempre el mismo lado del empate, para que el grano de hoy no salte de celda cada fotograma.
-  const neck = w.sim.findNeckGrain(0);
-  if (neck >= 0 && neck !== at) w.sim.swapCells(neck, at);
+  const neck = sim.findNeckGrain(0);
+  if (neck >= 0 && neck !== at) sim.swapCells(neck, at);
 }
 
 // ---------------------------------------------------------------- agitación
@@ -436,6 +529,11 @@ let lastWakeAll = 0;
 function applyShake(imp: ShakeImpulse): void {
   const w = world;
   if (!w || reducedMotion) return;
+  if (w.altView instanceof CoinsView) {
+    w.altView.tremor(imp.intensity);
+    return;
+  }
+  if (!w.sim) return;
   w.sim.agitation = Math.max(w.sim.agitation, imp.intensity);
   w.sim.tilt = imp.dir * 0.75 * imp.intensity;
   const now = performance.now();
@@ -483,10 +581,13 @@ window.addEventListener('deviceorientation', (e) => {
   const turn = ((screen.orientation?.angle ?? 0) * Math.PI) / 180;
   let phone = angleDelta(0, Math.atan2(gx, gy) - turn);
   if (Math.abs(phone) < 0.08) phone = 0;
-  // La arena de la rejilla no resbala hasta los 45°: se exagera un poco la inclinación
-  // para que se note sin tener que tumbar el móvil.
   const target = phone + 0.5 * Math.sin(phone);
   gyroAngle += angleDelta(gyroAngle, target) * 0.3;
+  if (w.altView instanceof CoinsView) {
+    w.altView.setTilt(gyroAngle);
+    return;
+  }
+  if (!w.sim) return;
   const moved = Math.abs(angleDelta(w.sim.gravityAngle, gyroAngle));
   w.sim.gravityAngle = gyroAngle;
   const now = performance.now();
@@ -511,7 +612,9 @@ function askMotionPermission(): void {
 // ---------------------------------------------------------------- tooltip
 
 function pickGrain(w: World, cssX: number, cssY: number, touch: boolean): number {
+  if (w.altView) return w.altView.pick(cssX, cssY);
   const { renderer, sim } = w;
+  if (!renderer || !sim) return -1;
   const g = renderer.toGrid(cssX, cssY);
   const reach = Math.max(1.5, ((touch ? 16 : 7) * renderer.dpr) / renderer.s);
   for (const h of w.heroes) {
@@ -587,6 +690,7 @@ window.addEventListener('keydown', (e) => {
 
 function applyPalette(w: World): void {
   w.colors = layersOn ? w.layers.colors : w.sandColors;
+  if (!w.renderer) return;
   if (layersOn) w.renderer.setColors(w.colors, w.layers.dim, w.layers.yearOf);
   else w.renderer.setColors(w.colors, w.sandDim);
 }
@@ -659,25 +763,52 @@ function showHint(text: string, ms = 7000): void {
   hintTimer = window.setTimeout(() => hintEl.classList.add('oculta'), ms);
 }
 
+function updateSortButton(): void {
+  const w = world;
+  if (w?.altView instanceof CoinsView) {
+    const messy = w.altView.hasMessyCoins();
+    sortBtn.hidden = !messy;
+    sortBtn.disabled = false;
+    sortBtn.textContent = 'Apilar monedas';
+    return;
+  }
+  sortBtn.hidden = !layersOn || !!w?.altView;
+  if (!w?.sim?.sorting) {
+    sortBtn.disabled = false;
+    sortBtn.textContent = 'Ordenar capas';
+  }
+}
+
 function setLayers(on: boolean): void {
   layersOn = on;
   saveLayers(on);
   layersBtn.setAttribute('aria-pressed', String(on));
-  sortBtn.hidden = !on;
+  updateSortButton();
   hideTooltip();
   hideLens();
   if (world) applyPalette(world);
-  if (on) showHint(`Cada color es ${unit === 'segundos' ? 'una hora' : 'un año'} · pasa por encima o toca la arena para ver cuál`);
+  if (on) {
+    const what = unit === 'segundos' ? 'una hora' : 'un año';
+    const target = unit === 'nominas' ? 'una moneda' : unit === 'anios' ? 'un anillo' : 'la arena';
+    showHint(`Cada color es ${what} · pasa por encima o toca ${target} para ver cuál`);
+  }
 }
 
 layersBtn.setAttribute('aria-pressed', String(layersOn));
 layersBtn.addEventListener('click', () => setLayers(!layersOn));
 sortBtn.hidden = !layersOn;
 
-/** Reordena los granos por fecha: las capas vuelven a quedar limpias, de abajo arriba. */
+/** Reordena los granos por fecha o vuelve a apilar las monedas desordenadas. */
 function startSort(): void {
   const w = world;
-  if (!w || w.sim.sorting) return;
+  if (!w) return;
+  if (w.altView instanceof CoinsView) {
+    hideTooltip();
+    w.altView.tidy();
+    updateSortButton();
+    return;
+  }
+  if (!w.sim || w.sim.sorting) return;
   hideTooltip();
   w.sim.startSort();
   sortBtn.disabled = true;
@@ -685,8 +816,7 @@ function startSort(): void {
 }
 
 function endSort(): void {
-  sortBtn.disabled = false;
-  sortBtn.textContent = 'Ordenar capas';
+  updateSortButton();
 }
 
 sortBtn.addEventListener('click', startSort);
@@ -712,12 +842,13 @@ let finger: (Point & { r: number }) | null = null;
 
 /** Radio del dedo en celdas: unos 11 px con ratón y 18 px con el dedo. */
 function fingerRadius(w: World, touch: boolean): number {
-  const { dpr, s } = w.renderer;
+  const { dpr, s } = w.renderer!;
   return Math.max(1.5, Math.min(28, ((touch ? 18 : 11) * dpr) / s));
 }
 
 /** Remueve la arena a lo largo del trazo, en pasos de medio radio para no dejar huecos. */
 function digAlong(w: World, a: Point, b: Point, r: number): void {
+  if (!w.sim) return;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const steps = Math.min(40, Math.max(1, Math.ceil(Math.hypot(dx, dy) / (r * 0.5))));
@@ -733,7 +864,7 @@ canvas.addEventListener('pointerdown', (e) => {
     pointerId: e.pointerId,
     x0: e.clientX,
     y0: e.clientY,
-    last: w.renderer.toGrid(e.clientX, e.clientY),
+    last: w.renderer ? w.renderer.toGrid(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY },
     dragging: false,
     touch: e.pointerType !== 'mouse',
     angle0: viewAngle,
@@ -748,6 +879,31 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const w = world;
   if (!w) return;
+  // En pilas de monedas (nóminas) y anillos de árbol (años): arrastrar coge/desordena monedas y pasar el ratón resalta.
+  if (w.altView) {
+    if (press && e.pointerId === press.pointerId && w.altView instanceof CoinsView) {
+      if (!press.dragging) {
+        if (Math.hypot(e.clientX - press.x0, e.clientY - press.y0) < DRAG_START_PX) return;
+        press.dragging = true;
+        hideTooltip();
+        hoverAltId = -1;
+        canvas.classList.add('removiendo');
+        w.altView.beginDrag(press.x0, press.y0);
+        press.last = { x: press.x0, y: press.y0 };
+      }
+      w.altView.moveDrag(e.clientX, e.clientY, e.clientX - press.last.x, e.clientY - press.last.y);
+      press.last = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (e.pointerType === 'mouse') {
+      const id = w.altView.pick(e.clientX, e.clientY);
+      hoverAltId = id;
+      hoverYear = layersOn && id >= 0 ? w.layers.yearOf[id] : -1;
+      canvas.classList.toggle('moneda-cogible', w.altView instanceof CoinsView && id >= 0);
+    }
+    return;
+  }
+  if (!w.renderer) return;
   if (press && e.pointerId === press.pointerId) {
     if (!press.dragging) {
       if (Math.hypot(e.clientX - press.x0, e.clientY - press.y0) < DRAG_START_PX) return;
@@ -800,15 +956,20 @@ function endPress(e: PointerEvent, tap: boolean): void {
   tilting = false;
   canvas.classList.remove('removiendo');
   const w = world;
+  if (w?.altView instanceof CoinsView && p.dragging) {
+    w.altView.endDrag();
+    updateSortButton();
+    return;
+  }
   if (!w || !tap || p.dragging) return;
-  // Un toque sin arrastre: muestra el grano que hay debajo.
+  // Un toque sin arrastre: muestra el grano, moneda o anillo que hay debajo.
   const id = pickGrain(w, p.x0, p.y0, p.touch);
   if (id < 0) {
     hideTooltip();
     return;
   }
   selectedId = id;
-  if (!p.touch) {
+  if (!p.touch && !w.altView) {
     hideLens();
     lensAway = { x: p.x0, y: p.y0 };
   }
@@ -816,9 +977,17 @@ function endPress(e: PointerEvent, tap: boolean): void {
 }
 
 canvas.addEventListener('pointerup', (e) => endPress(e, true));
-// Doble clic: una vuelta completa al reloj. La arena da tumbos, pero el cuello sigue cerrado.
+// Doble clic: vuelta completa en el reloj de arena, o apilar/sacudir las pilas de monedas.
 canvas.addEventListener('dblclick', () => {
   if (!world || reducedMotion) return;
+  if (world.altView instanceof CoinsView) {
+    hideTooltip();
+    if (world.altView.hasMessyCoins()) world.altView.tidy();
+    else world.altView.tremor(1);
+    updateSortButton();
+    return;
+  }
+  if (!world.sim) return;
   hideTooltip();
   tilting = false;
   spinStart = performance.now();
@@ -836,6 +1005,7 @@ const SPIN_MS = 1800;
 let lastTiltWake = 0;
 
 function updateTilt(w: World, now: number): void {
+  if (!w.sim) return;
   if (spinStart >= 0) {
     const p = Math.min(1, (now - spinStart) / SPIN_MS);
     const ease = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
@@ -859,6 +1029,8 @@ function updateTilt(w: World, now: number): void {
 }
 canvas.addEventListener('pointercancel', (e) => endPress(e, false));
 canvas.addEventListener('pointerleave', () => {
+  hoverAltId = -1;
+  canvas.classList.remove('moneda-cogible');
   if (!press) hideLens();
 });
 
@@ -980,8 +1152,20 @@ function hideMilestone(): void {
   milestoneEl.hidden = true;
 }
 
+/** IDs de los tres próximos hitos (para el árbol y las monedas). */
+function nextMilestoneIds(w: World): number[] {
+  const out: number[] = [];
+  for (const m of w.milestones) {
+    if (m.id < w.landed) continue;
+    out.push(m.id);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
 /** Posición de los tres próximos hitos, para que brillen (todos a la vez serían demasiados). */
 function milestoneMarks(w: World): Point[] {
+  if (!w.sim) return [];
   const out: Point[] = [];
   for (const m of w.milestones) {
     if (m.id < w.landed) continue;
@@ -1129,8 +1313,24 @@ function openShare(): void {
     percent: formatPercent(fraction),
     fraction,
   };
-  const frame = { time: performance.now(), heroes: [], today: null, selected: null, highlight: -1, cutoff: -1, marks: [], finger: null };
-  const { canvas: clock } = w.renderer.snapshot(CLOCK_SIZE.width, CLOCK_SIZE.height, frame);
+  let clock: HTMLCanvasElement;
+  if (w.altView) {
+    const altFrame: AltFrame = {
+      time: performance.now(),
+      landed: w.landed,
+      selected: -1,
+      hovered: -1,
+      layersOn,
+      highlightYear: -1,
+      cutoff: -1,
+      milestoneIds: [],
+      reducedMotion: true,
+    };
+    clock = w.altView.snapshot(CLOCK_SIZE.width, CLOCK_SIZE.height, altFrame).canvas;
+  } else {
+    const frame = { time: performance.now(), heroes: [], today: null, selected: null, highlight: -1, cutoff: -1, marks: [], finger: null };
+    clock = w.renderer!.snapshot(CLOCK_SIZE.width, CLOCK_SIZE.height, frame).canvas;
+  }
   const card = drawCard(clock, info);
   shareMessage = `${shareText(info)} ${SHARE_URL}`;
   shareStatus.textContent = '';
@@ -1194,9 +1394,13 @@ let lastPlayDay = -1;
 
 function setTopExtra(px: number): void {
   topExtra = px;
-  if (world) {
+  if (world?.renderer) {
     world.renderer.topExtra = px;
     world.renderer.resize();
+  }
+  if (world?.altView) {
+    world.altView.topExtra = px;
+    world.altView.resize();
   }
 }
 
@@ -1337,7 +1541,7 @@ function tick(now: number): void {
     fps = (fpsFrames * 1000) / (now - fpsSince);
     fpsFrames = 0;
     fpsSince = now;
-    if (showFps && world) fpsEl.textContent = `${fps.toFixed(0)} fps · ${world.sim.activeCount} activos`;
+    if (showFps && world) fpsEl.textContent = `${fps.toFixed(0)} fps · ${world.sim?.activeCount ?? 0} activos`;
   }
 
   const w = world;
@@ -1354,10 +1558,34 @@ function tick(now: number): void {
   // Un aviso de la reproducción nunca sobrevive a ella.
   if (!play && !milestoneEl.hidden && milestoneEl.classList.contains('en-reproduccion')) hideMilestone();
   updateDrops(w, now);
+
+  // Vistas alternativas (pilas de monedas 8-bits en nóminas, anillos de árbol en años).
+  if (w.altView) {
+    sound.setActivity(0);
+    canvas.classList.remove('con-lupa');
+    let highlightYear = -1;
+    if (layersOn) {
+      if (hoverYear >= 0) highlightYear = hoverYear;
+      else if (selectedId >= 0) highlightYear = w.layers.yearOf[selectedId];
+    }
+    w.altView.draw({
+      time: now,
+      landed: w.landed,
+      selected: selectedId,
+      hovered: hoverAltId,
+      layersOn,
+      highlightYear,
+      cutoff: ageCutoff,
+      milestoneIds: nextMilestoneIds(w),
+      reducedMotion,
+    });
+    return;
+  }
+
   updateTilt(w, now);
   keepTodayAtNeck(w);
 
-  const sim = w.sim;
+  const sim = w.sim!;
   sim.step();
   sim.step();
   if (sim.sorting) {
@@ -1379,7 +1607,7 @@ function tick(now: number): void {
   });
 
   let today: Point | null = null;
-  if (w.unit !== 'segundos' && w.target < w.grains.total && w.nextDrop === w.target) today = w.sim.pointOf(w.target);
+  if (w.unit !== 'segundos' && w.target < w.grains.total && w.nextDrop === w.target) today = sim.pointOf(w.target);
 
   let selected: Point | null = null;
   if (selectedId >= 0) {
@@ -1396,11 +1624,11 @@ function tick(now: number): void {
 
   let lensFrame = null;
   if (lens) {
-    lensFrame = { x: lens.x, y: lens.y, grain: lens.id >= 0 ? w.sim.pointOf(lens.id) : null };
+    lensFrame = { x: lens.x, y: lens.y, grain: lens.id >= 0 ? sim.pointOf(lens.id) : null };
   }
   canvas.classList.toggle('con-lupa', !!lens);
 
-  w.renderer.draw({
+  w.renderer!.draw({
     time: now,
     heroes,
     today: reducedMotion ? null : today,
@@ -1418,10 +1646,14 @@ function tick(now: number): void {
 
 window.addEventListener('resize', () => {
   if (play) openPlayPanel();
-  world?.renderer.resize();
+  world?.renderer?.resize();
+  world?.altView?.resize();
   hideTooltip();
 });
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => world?.renderer.refreshTheme());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  world?.renderer?.refreshTheme();
+  world?.altView?.refreshTheme();
+});
 document.addEventListener('visibilitychange', () => {
   // Sin fotogramas en segundo plano, el siseo se quedaría sonando.
   if (document.visibilityState !== 'visible') sound.setActivity(0);
@@ -1443,8 +1675,11 @@ window.setTimeout(() => hintEl.classList.add('oculta'), 10_000);
 const unitBox = $('unidades');
 const unitButtons = [...unitBox.querySelectorAll<HTMLButtonElement>('[data-unidad]')];
 
-const unitHint = (u: UnitId) =>
-  `Cada grano es ${UNIT_NAMES[u].grain} · toca uno para verlo · arrastra o agita para remover la arena`;
+const unitHint = (u: UnitId) => {
+  if (u === 'nominas') return 'Cada moneda es una nómina · arrastra para moverlas o desordenarlas · doble clic para volver a apilar';
+  if (u === 'anios') return 'Cada anillo del árbol es un año de tu vida laboral · toca uno para ver su frase';
+  return `Cada grano es ${UNIT_NAMES[u].grain} · toca uno para verlo · arrastra o agita para remover la arena`;
+};
 
 /** Pone los botones y textos de acuerdo con la unidad elegida. */
 function updateUnitUi(): void {
@@ -1518,7 +1753,7 @@ if (import.meta.env.DEV) {
     startSort,
     setUnit,
     tiltTo: (deg: number) => {
-      if (!world) return;
+      if (!world?.sim) return;
       world.sim.gravityAngle = (deg * Math.PI) / 180;
       world.sim.wakeAll();
     },

@@ -1,6 +1,5 @@
 import { profileHalf, type Hourglass } from './hourglass';
 import type { GrainSim } from './sim';
-import { MarbleSim } from './marbles';
 
 export interface Point {
   x: number; // coordenadas de rejilla (celdas, admite decimales)
@@ -10,6 +9,8 @@ export interface Point {
 export interface HeroDraw extends Point {
   color: string;
   glow: number; // 0..1
+  /** Radio exacto de la canica que cae (en celdas), si aplica. */
+  rad?: number;
 }
 
 export interface DrawFrame {
@@ -35,22 +36,26 @@ interface Theme {
   glassFill: string;
   glassEdge: string;
   glassShine: string;
+  glassRim: string;
   cap: string;
+  cap2: string;
   capEdge: string;
+  capShine: string;
   glow: string;
   bg: string;
   shadow: string;
   ambient: string;
+  ambientCool: string;
 }
 
 /** Radio de la lupa en píxeles CSS. */
 export const LENS_RADIUS = 64;
 
-const TOP_RESERVE = 56;
-const BOTTOM_RESERVE = 104;
-const CAP_CSS = 18;
+const TOP_RESERVE = 60;
+const BOTTOM_RESERVE = 114;
+const CAP_CSS = 16;
 /** Ancho de las tapas respecto al del vidrio: tienen que caber. */
-const FRAME_SPAN = 1.1;
+const FRAME_SPAN = 1.12;
 
 export class Renderer {
   /** Tamaño de celda en píxeles de dispositivo y origen de la rejilla. */
@@ -105,12 +110,16 @@ export class Renderer {
       glassFill: v('--glass-fill'),
       glassEdge: v('--glass-edge'),
       glassShine: v('--glass-shine'),
+      glassRim: v('--glass-rim') || 'rgba(255,255,255,0.1)',
       cap: v('--cap'),
+      cap2: v('--cap-2') || v('--cap-edge'),
       capEdge: v('--cap-edge'),
+      capShine: v('--cap-shine') || 'rgba(255,255,255,0.22)',
       glow: v('--glow'),
       bg: v('--bg-2'),
       shadow: v('--shadow'),
       ambient: v('--ambient'),
+      ambientCool: v('--ambient-cool') || 'rgba(100,152,255,0.08)',
     };
   }
 
@@ -126,8 +135,7 @@ export class Renderer {
     this.s = Math.max(0.5, Math.min(availW / (W + 4), availW / ((this.hg.maxHalf + 0.6) * 2 * FRAME_SPAN), availH / H));
     this.ox = Math.round((this.canvas.width - W * this.s) / 2);
     this.oy = Math.round((top + CAP_CSS) * dpr + (availH - H * this.s) / 2);
-    // Las canicas con física, siempre redondas; la arena, solo si las celdas son muy grandes.
-    this.marbles = this.sim instanceof MarbleSim || (this.sim.grainCount <= 5000 && this.s >= 6);
+    this.marbles = this.sim.grainCount <= 5000 && this.s >= 6;
     this.glass = this.buildGlassPath();
     this.shine = this.buildShine();
     this.relief = this.buildRelief();
@@ -148,17 +156,17 @@ export class Renderer {
     const s = this.s;
     const cx = this.ox + (W / 2) * s;
     const out: { path: Path2D; width: number; y0: number; y1: number; alpha: number }[] = [];
-    // En cada bulbo, una franja a la izquierda y otra más fina a la derecha, lejos del cuello y de las tapas.
+    // Reflejos ópticos curvos: banda principal a la izquierda y filo de contraluz fino a la derecha.
     for (const [y0, y1] of [
-      [topEnd * 0.1, topEnd * 0.62],
-      [bottomStart + (H - bottomStart) * 0.38, H - (H - bottomStart) * 0.1],
+      [topEnd * 0.08, topEnd * 0.72],
+      [bottomStart + (H - bottomStart) * 0.28, H - (H - bottomStart) * 0.08],
     ]) {
       for (const [k, w, alpha] of [
-        [-0.7, 0.16, 1],
-        [0.8, 0.06, 0.6],
+        [-0.74, 0.12, 1],
+        [0.83, 0.045, 0.65],
       ]) {
         const p = new Path2D();
-        const steps = 24;
+        const steps = 28;
         for (let i = 0; i <= steps; i++) {
           const y = y0 + ((y1 - y0) * i) / steps;
           const x = cx + k * this.glassHalf(y) * s;
@@ -230,80 +238,9 @@ export class Renderer {
     return this.marbles ? this.s * 0.46 : Math.max(1.6 * this.dpr, this.s * 0.9);
   }
 
-  /** Resaltado y recorte del fotograma en curso, para colorear cada canica. */
-  private frameHl = -1;
-  private frameCut = -1;
-
-  /** Color de un grano en este fotograma, y si va atenuado. */
-  private colorOf(id: number): [number, boolean] {
-    const { dim, groupOf } = this;
-    const faded = !!dim && ((this.frameCut >= 0 && id >= this.frameCut) || (this.frameHl >= 0 && !!groupOf && groupOf[id] !== this.frameHl));
-    return [faded ? dim![id] : this.colors[id], faded];
-  }
-
-  /**
-   * Sombreado de una canica, igual para todas: borde algo más oscuro y un brillo arriba a la
-   * izquierda, como el de una canica de cristal. Se pinta encima del color de cada una.
-   */
-  private shade: HTMLCanvasElement | null = null;
-  private shadeR = 0;
-  private marbleShade(r: number): HTMLCanvasElement {
-    if (this.shade && Math.abs(this.shadeR - r) < 0.01) return this.shade;
-    const size = Math.ceil(r * 2) + 2;
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    const g = c.getContext('2d')!;
-    const m = size / 2;
-    const disc = () => {
-      g.beginPath();
-      g.arc(m, m, r, 0, Math.PI * 2);
-      g.fill();
-    };
-    let grad = g.createRadialGradient(m - r * 0.2, m - r * 0.25, r * 0.35, m, m, r);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(0.75, 'rgba(60,30,0,0.12)');
-    grad.addColorStop(1, 'rgba(40,18,0,0.45)');
-    g.fillStyle = grad;
-    disc();
-    grad = g.createRadialGradient(m - r * 0.36, m - r * 0.42, 0, m - r * 0.36, m - r * 0.42, r * 0.6);
-    grad.addColorStop(0, 'rgba(255,255,255,0.75)');
-    grad.addColorStop(0.35, 'rgba(255,255,255,0.25)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    disc();
-    this.shade = c;
-    this.shadeR = r;
-    return c;
-  }
-
-  /** Una canica en (px, py), en píxeles de dispositivo. */
-  private drawMarble(ctx: CanvasRenderingContext2D, px: number, py: number, r: number, color: string, alpha: number): void {
-    // Un solo sombreado (del tamaño de la canica más grande), escalado a cada radio.
-    const big = this.s * 0.48;
-    const sprite = this.marbleShade(big);
-    const k = r / big;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(sprite, px - (sprite.width / 2) * k, py - (sprite.height / 2) * k, sprite.width * k, sprite.height * k);
-    ctx.globalAlpha = 1;
-  }
-
   /** Dibuja la arena: el lienzo auxiliar escalado o, con celdas grandes, una canica por grano. */
   private drawSand(ctx: CanvasRenderingContext2D): void {
     const { hg, s } = this;
-    if (this.sim instanceof MarbleSim) {
-      // Canicas con física: cada una en su posición exacta, no en su celda.
-      const sim = this.sim;
-      for (let id = 0; id < sim.grainCount; id++) {
-        if (!sim.bulb[id]) continue;
-        const [c, faded] = this.colorOf(id);
-        this.drawMarble(ctx, this.ox + sim.x[id] * s, this.oy + sim.y[id] * s, s * sim.rad[id] * 0.96, this.cssOf(c), faded ? 0.25 : 1);
-      }
-      return;
-    }
     if (!this.marbles) {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
@@ -319,7 +256,6 @@ export class Renderer {
       ctx.arc(this.ox + ((i % hg.W) + 0.5) * s, this.oy + (Math.floor(i / hg.W) + 0.5) * s, r, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Un brillo pequeño arriba a la izquierda de cada canica, todos de una vez.
     const shine = new Path2D();
     for (let i = 0; i < buf.length; i++) {
       if (buf[i] === 0 || buf[i] >>> 24 < 200) continue;
@@ -413,8 +349,6 @@ export class Renderer {
       }
     }
     this.offCtx.putImageData(this.img, 0, 0);
-    this.frameHl = hl;
-    this.frameCut = cut;
 
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.drawSurroundings();
@@ -438,7 +372,7 @@ export class Renderer {
       ctx.translate(-c.x, -c.y);
     }
 
-    // Vidrio (fondo): más claro hacia los bordes, como un cristal curvo visto de frente.
+    // Vidrio (fondo): cristal translúcido con efecto Fresnel en los bordes.
     ctx.fillStyle = theme.glassFill;
     ctx.fill(this.glass);
     this.drawGlassBack();
@@ -454,34 +388,30 @@ export class Renderer {
     // Hitos pendientes: un brillo pequeño que late despacio
     if (f.marks.length) {
       const pulse = 0.5 + 0.3 * Math.sin(f.time / 900);
-      for (const m of f.marks) this.drawGlow(m, Math.max(5 * dpr, glowCells(3.5, 0.9)), pulse);
+      for (const m of f.marks) this.drawGlow(m, Math.max(5 * dpr, glowCells(3.5, 0.95)), pulse);
     }
 
     // Grano de hoy, esperando en el cuello
     if (f.today) {
       const pulse = 0.55 + 0.45 * Math.sin(f.time / 600);
-      this.drawGlow(f.today, Math.max(6 * dpr, glowCells(5, 1.1)), pulse * 0.7);
+      this.drawGlow(f.today, Math.max(6 * dpr, glowCells(5, 1.15)), pulse * 0.72);
     }
 
     // Granos protagonistas cayendo
     for (const h of f.heroes) {
       const px = this.ox + h.x * s;
       const py = this.oy + h.y * s;
-      if (h.glow > 0.01) this.drawGlow(h, Math.max(9 * dpr, glowCells(7, 1.4)), h.glow);
-      if (this.sim instanceof MarbleSim) {
-        this.drawMarble(ctx, px, py, s * 0.48, h.color, 1);
-        continue;
-      }
+      if (h.glow > 0.01) this.drawGlow(h, Math.max(9 * dpr, glowCells(7, 1.45)), h.glow);
       ctx.fillStyle = h.color;
       ctx.beginPath();
       ctx.arc(px, py, this.grainRadius(), 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Vidrio (delante): brillos curvos y un borde con grosor.
+    // Vidrio (delante): brillos curvos, grosor óptico y borde luminoso.
     this.drawGlassFront();
 
-    // Tapas de madera, encima de los extremos del vidrio y de las columnas.
+    // Tapas minimalistas de metal/cristal pulido, asentadas sobre el vidrio.
     this.drawCaps();
 
     // Dedo removiendo la arena
@@ -502,7 +432,7 @@ export class Renderer {
       const px = this.ox + f.selected.x * s;
       const py = this.oy + f.selected.y * s;
       ctx.strokeStyle = theme.glow;
-      ctx.lineWidth = 1.5 * dpr;
+      ctx.lineWidth = 1.7 * dpr;
       ctx.beginPath();
       ctx.arc(px, py, this.marbles ? s * 0.62 : Math.max(6 * dpr, s * 2.2), 0, Math.PI * 2);
       ctx.stroke();
@@ -513,8 +443,8 @@ export class Renderer {
   }
 
   /**
-   * Lupa redonda centrada en el ratón: el reloj ampliado (vidrio incluido) para que cada grano
-   * mida unos 10 px, con el grano señalado recuadrado.
+   * Lupa de cristal redonda centrada en el ratón: el reloj ampliado con bisel luminoso
+   * y el grano señalado recuadrado.
    */
   private drawLens(l: NonNullable<DrawFrame['lens']>): void {
     const { ctx, dpr, s, theme } = this;
@@ -526,15 +456,14 @@ export class Renderer {
     ring.arc(cx, cy, r, 0, Math.PI * 2);
 
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
-    ctx.shadowBlur = 18 * dpr;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+    ctx.shadowBlur = 24 * dpr;
     ctx.fillStyle = theme.bg;
     ctx.fill(ring);
     ctx.restore();
 
     ctx.save();
     ctx.clip(ring);
-    // Lo que hay bajo el ratón, en píxeles de pantalla, pasa a ocupar el centro de la lupa.
     ctx.translate(cx, cy);
     ctx.scale(zoom, zoom);
     ctx.translate(-cx, -cy);
@@ -548,11 +477,30 @@ export class Renderer {
       const m = 0.25 * s;
       ctx.lineWidth = (2 * dpr) / zoom;
       ctx.strokeStyle = theme.glow;
-      ctx.strokeRect(this.ox + (l.grain.x - 0.5) * s - m, this.oy + (l.grain.y - 0.5) * s - m, s + 2 * m, s + 2 * m);
+      ctx.beginPath();
+      ctx.roundRect(
+        this.ox + (l.grain.x - 0.5) * s - m,
+        this.oy + (l.grain.y - 0.5) * s - m,
+        s + 2 * m,
+        s + 2 * m,
+        0.25 * s,
+      );
+      ctx.stroke();
     }
     ctx.restore();
 
-    ctx.lineWidth = 2 * dpr;
+    // Brillo interior sutil de lente óptica
+    ctx.save();
+    ctx.clip(ring);
+    const sheen = ctx.createLinearGradient(cx - r, cy - r, cx + r * 0.4, cy + r * 0.4);
+    sheen.addColorStop(0, theme.glassShine);
+    sheen.addColorStop(0.35, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sheen;
+    ctx.globalAlpha = 0.45;
+    ctx.fill(ring);
+    ctx.restore();
+
+    ctx.lineWidth = 1.8 * dpr;
     ctx.strokeStyle = theme.glassEdge;
     ctx.stroke(ring);
   }
@@ -576,56 +524,105 @@ export class Renderer {
     const cx = this.ox + (hg.W / 2) * s;
     const glassHalf = (hg.maxHalf + 0.6) * s;
     const capH = CAP_CSS * dpr;
-    // Las tapas sobresalen un poco del vidrio, como en un reloj de arena de verdad.
-    const capHalf = glassHalf * 1.06 + 4 * dpr;
+    // Las tapas sobresalen con limpieza sobre el vidrio.
+    const capHalf = glassHalf * 1.07 + 4 * dpr;
     return { cx, glassHalf, capH, capHalf, top: this.oy, bottom: this.oy + hg.H * s };
   }
 
-  /** Luz ambiental detrás del reloj y su sombra en el suelo (no giran con él). */
+  /** Luz ambiental fría+cálida detrás del reloj y sombra multicapa en la base (no giran con él). */
   private drawSurroundings(): void {
     const { ctx, theme } = this;
     const f = this.frame();
+    const h = f.bottom - f.top;
     const midY = (f.top + f.bottom) / 2;
-    const rad = Math.max(f.bottom - f.top, f.capHalf * 2) * 0.75;
-    const amb = ctx.createRadialGradient(f.cx, midY, 0, f.cx, midY, rad);
+    const rad = Math.max(h, f.capHalf * 2) * 0.8;
+
+    // Halo frío desplazado ligeramente hacia arriba-izquierda (estética cristal).
+    const cool = ctx.createRadialGradient(f.cx - f.capHalf * 0.45, f.top + h * 0.25, 0, f.cx, midY, rad);
+    cool.addColorStop(0, theme.ambientCool);
+    cool.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = cool;
+    ctx.fillRect(f.cx - rad, midY - rad, rad * 2, rad * 2);
+
+    // Núcleo cálido sutil detrás de la arena.
+    const amb = ctx.createRadialGradient(f.cx, midY + h * 0.08, 0, f.cx, midY, rad * 0.85);
     amb.addColorStop(0, theme.ambient);
     amb.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = amb;
     ctx.fillRect(f.cx - rad, midY - rad, rad * 2, rad * 2);
 
-    const sy = f.bottom + f.capH * 1.05;
-    const sw = f.capHalf * 1.25;
-    const sh = f.capH * 1.1;
+    // Sombra proyectada difusa + sombra de contacto más definida bajo la tapa inferior.
+    for (const [yOff, wMul, hMul, alpha] of [
+      [f.capH * 1.15, 1.36, 1.25, 0.72],
+      [f.capH * 1.02, 1.04, 0.42, 0.9],
+    ]) {
+      const sy = f.bottom + yOff;
+      const sw = f.capHalf * wMul;
+      const sh = f.capH * hMul;
+      ctx.save();
+      ctx.translate(f.cx, sy);
+      ctx.scale(1, sh / sw);
+      const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, sw);
+      shadow.addColorStop(0, theme.shadow);
+      shadow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = shadow;
+      ctx.beginPath();
+      ctx.arc(0, 0, sw, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Reflejo sutil de la base sobre la superficie pulida inferior.
+    const refY = f.bottom + f.capH * 1.18;
+    const refH = f.capH * 1.9;
+    const refGrad = ctx.createLinearGradient(0, refY, 0, refY + refH);
+    refGrad.addColorStop(0, theme.ambient);
+    refGrad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.save();
-    ctx.translate(f.cx, sy);
-    ctx.scale(1, sh / sw);
-    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, sw);
-    shadow.addColorStop(0, theme.shadow);
-    shadow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = shadow;
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = refGrad;
     ctx.beginPath();
-    ctx.arc(0, 0, sw, 0, Math.PI * 2);
+    ctx.ellipse(f.cx, refY + refH * 0.35, f.capHalf * 0.92, refH * 0.55, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
-  /** Fondo del vidrio: un poco más claro junto al borde (el cristal curvo refleja más ahí). */
+  /** Fondo del vidrio: efecto Fresnel suave en los bordes y leve sombreado donde encaja con las tapas. */
   private drawGlassBack(): void {
-    const { ctx } = this;
+    const { ctx, theme } = this;
     const f = this.frame();
+    const h = f.bottom - f.top;
     ctx.save();
     ctx.clip(this.glass);
+
     const g = ctx.createLinearGradient(f.cx - f.glassHalf, 0, f.cx + f.glassHalf, 0);
-    g.addColorStop(0, 'rgba(255,255,255,0.10)');
-    g.addColorStop(0.18, 'rgba(255,255,255,0.02)');
-    g.addColorStop(0.82, 'rgba(255,255,255,0.02)');
-    g.addColorStop(1, 'rgba(255,255,255,0.08)');
+    g.addColorStop(0, theme.glassRim);
+    g.addColorStop(0.16, 'rgba(255,255,255,0.015)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0)');
+    g.addColorStop(0.84, 'rgba(255,255,255,0.015)');
+    g.addColorStop(1, theme.glassRim);
     ctx.fillStyle = g;
-    ctx.fillRect(f.cx - f.glassHalf, f.top, f.glassHalf * 2, f.bottom - f.top);
+    ctx.fillRect(f.cx - f.glassHalf, f.top, f.glassHalf * 2, h);
+
+    // Sombra sutil de encaje del vidrio en ambas tapas.
+    const seatH = Math.min(22 * this.dpr, h * 0.08);
+    const topSeat = ctx.createLinearGradient(0, f.top, 0, f.top + seatH);
+    topSeat.addColorStop(0, 'rgba(0,0,0,0.22)');
+    topSeat.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = topSeat;
+    ctx.fillRect(f.cx - f.glassHalf, f.top, f.glassHalf * 2, seatH);
+
+    const botSeat = ctx.createLinearGradient(0, f.bottom - seatH, 0, f.bottom);
+    botSeat.addColorStop(0, 'rgba(0,0,0,0)');
+    botSeat.addColorStop(1, 'rgba(0,0,0,0.2)');
+    ctx.fillStyle = botSeat;
+    ctx.fillRect(f.cx - f.glassHalf, f.bottom - seatH, f.glassHalf * 2, seatH);
+
     ctx.restore();
   }
 
-  /** Delante de la arena: brillos curvos y el borde del vidrio con grosor. */
+  /** Delante de la arena: brillos ópticos curvos, grosor interior del cristal y filo luminoso. */
   private drawGlassFront(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
@@ -633,56 +630,118 @@ export class Renderer {
     ctx.clip(this.glass);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
     for (const { path, width, y0, y1, alpha } of this.shine) {
-      // Un reflejo ancho y suave que se desvanece por los extremos, con un núcleo algo más vivo.
       const g = ctx.createLinearGradient(0, y0, 0, y1);
       g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(0.3, theme.glassShine);
+      g.addColorStop(0.25, theme.glassShine);
       g.addColorStop(0.75, theme.glassShine);
       g.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.strokeStyle = g;
-      ctx.globalAlpha = 0.55 * alpha;
+      // Halo suave
+      ctx.globalAlpha = 0.42 * alpha;
       ctx.lineWidth = width;
       ctx.stroke(path);
-      ctx.globalAlpha = 0.5 * alpha;
-      ctx.lineWidth = width * 0.3;
+      // Filo especular nítido
+      ctx.globalAlpha = 0.65 * alpha;
+      ctx.lineWidth = Math.max(1.2 * dpr, width * 0.24);
       ctx.stroke(path);
     }
     ctx.globalAlpha = 1;
-    // Cara interior del borde: una franja clara muy fina que da grosor al cristal.
-    const rim = Math.max(1 * dpr, Math.min(2.5 * dpr, f.glassHalf * 0.012));
-    ctx.lineWidth = rim * 3;
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+
+    // Pared interior del vidrio (da sensación de grosor de cristal soplado).
+    const rim = Math.max(1.1 * dpr, Math.min(2.4 * dpr, f.glassHalf * 0.013));
+    ctx.lineWidth = rim * 3.4;
+    ctx.strokeStyle = theme.glassRim;
     ctx.stroke(this.glass);
     ctx.restore();
 
+    // Contorno exterior nítido con reflejo vertical.
+    const edgeGrad = ctx.createLinearGradient(f.cx - f.glassHalf, f.top, f.cx + f.glassHalf, f.bottom);
+    edgeGrad.addColorStop(0, theme.glassShine);
+    edgeGrad.addColorStop(0.28, theme.glassEdge);
+    edgeGrad.addColorStop(0.72, theme.glassEdge);
+    edgeGrad.addColorStop(1, theme.glassShine);
     ctx.lineJoin = 'round';
     ctx.lineWidth = rim;
-    ctx.strokeStyle = theme.glassEdge;
+    ctx.strokeStyle = edgeGrad;
     ctx.stroke(this.glass);
   }
 
-  /** Tapas: sobrias, con algo de volumen (más claras arriba y un canto iluminado). */
+  /** Tapas mecanizadas de dos niveles (collar de encaje + cuerpo biselado metal-cristal). */
   private drawCaps(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
-    for (const y of [f.top - f.capH, f.bottom]) {
-      const x = f.cx - f.capHalf;
-      const w = f.capHalf * 2;
-      const h = f.capH;
-      const g = ctx.createLinearGradient(0, y, 0, y + h);
-      g.addColorStop(0, theme.capEdge);
-      g.addColorStop(0.5, theme.cap);
-      g.addColorStop(1, theme.cap);
-      ctx.fillStyle = g;
+    const x = f.cx - f.capHalf;
+    const w = f.capHalf * 2;
+    const h = f.capH;
+    const radius = h * 0.42;
+    const lineH = Math.max(1, dpr);
+
+    for (const [y, isTop] of [
+      [f.top - h, true],
+      [f.bottom, false],
+    ] as const) {
+      // 1. Collar interior rebajado donde asienta físicamente el vidrio.
+      const colHalf = f.glassHalf * 0.94;
+      const colH = Math.max(3 * dpr, h * 0.24);
+      const colY = isTop ? f.top - colH * 0.35 : f.bottom - colH * 0.65;
+      const colGrad = ctx.createLinearGradient(f.cx - colHalf, 0, f.cx + colHalf, 0);
+      colGrad.addColorStop(0, theme.cap);
+      colGrad.addColorStop(0.28, theme.cap2);
+      colGrad.addColorStop(0.55, theme.cap);
+      colGrad.addColorStop(0.82, theme.cap2);
+      colGrad.addColorStop(1, theme.cap);
+      ctx.fillStyle = colGrad;
       ctx.beginPath();
-      ctx.roundRect(x, y, w, h, h * 0.4);
+      ctx.roundRect(f.cx - colHalf, colY, colHalf * 2, colH, colH * 0.4);
       ctx.fill();
-      ctx.lineWidth = Math.max(1, dpr);
+      ctx.lineWidth = Math.max(0.8, 0.9 * dpr);
       ctx.strokeStyle = theme.capEdge;
       ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      ctx.fillRect(x + h * 0.4, y + Math.max(1, dpr), w - h * 0.8, Math.max(1, dpr));
+
+      // 2. Cuerpo principal cilíndrico/biselado de la tapa.
+      const hg = ctx.createLinearGradient(x, y, x + w, y);
+      hg.addColorStop(0, theme.cap);
+      hg.addColorStop(0.18, theme.cap2);
+      hg.addColorStop(0.32, theme.capShine);
+      hg.addColorStop(0.46, theme.cap2);
+      hg.addColorStop(0.68, theme.cap);
+      hg.addColorStop(0.86, theme.cap2);
+      hg.addColorStop(1, theme.cap);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.fillStyle = hg;
+      ctx.fill();
+
+      // Sombreado de bisel vertical (cara superior clara, canto central, sombra inferior).
+      ctx.clip();
+      const vg = ctx.createLinearGradient(0, y, 0, y + h);
+      vg.addColorStop(0, 'rgba(255,255,255,0.22)');
+      vg.addColorStop(0.26, 'rgba(255,255,255,0.03)');
+      vg.addColorStop(0.65, 'rgba(0,0,0,0.08)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.34)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(x, y, w, h);
+
+      // Filo especular fino en el bisel superior.
+      const spec = ctx.createLinearGradient(x, 0, x + w, 0);
+      spec.addColorStop(0, 'rgba(255,255,255,0)');
+      spec.addColorStop(0.18, theme.capShine);
+      spec.addColorStop(0.82, theme.capShine);
+      spec.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = spec;
+      ctx.fillRect(x + radius * 0.4, y + lineH * 0.65, w - radius * 0.8, lineH);
+      ctx.restore();
+
+      // Contorno nítido.
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.lineWidth = Math.max(1, 1.1 * dpr);
+      ctx.strokeStyle = theme.capEdge;
+      ctx.stroke();
     }
   }
 

@@ -1,40 +1,57 @@
-/* Colores compartidos por el reloj y las páginas de texto. */
+/* Minimalismo moderno y cristal: tokens compartidos por el reloj y las páginas de texto. */
 :root {
   color-scheme: dark;
-  --bg: #0c0e13;
-  --bg-2: #171b26;
-  --fg: #ebe6db;
-  --muted: #9b968b;
-  --panel: rgba(22, 26, 36, 0.94);
-  --panel-edge: rgba(255, 255, 255, 0.08);
-  --accent: #e2b76c;
-  --glass-fill: rgba(190, 210, 255, 0.045);
-  --glass-edge: rgba(215, 228, 255, 0.42);
-  --glass-shine: rgba(255, 255, 255, 0.16);
-  --cap: #262b38;
-  --cap-edge: #3a4253;
-  --glow: rgba(255, 210, 130, 0.95);
-  --shadow: rgba(0, 0, 0, 0.55);
-  --ambient: rgba(226, 183, 108, 0.1);
+  --bg: #080b12;
+  --bg-2: #121827;
+  --fg: #f1f4fa;
+  --muted: #93a0b8;
+  --panel: rgba(16, 22, 36, 0.72);
+  --panel-solid: #121826;
+  --panel-edge: rgba(210, 228, 255, 0.14);
+  --panel-highlight: rgba(255, 255, 255, 0.08);
+  --accent: #f0c475;
+  --accent-ink: #12151f;
+  --accent-soft: rgba(240, 196, 117, 0.16);
+  --glass-fill: rgba(180, 214, 255, 0.05);
+  --glass-edge: rgba(215, 234, 255, 0.52);
+  --glass-shine: rgba(235, 246, 255, 0.24);
+  --glass-rim: rgba(220, 238, 255, 0.12);
+  --cap: #161d2d;
+  --cap-2: #242f47;
+  --cap-edge: rgba(205, 226, 255, 0.28);
+  --cap-shine: rgba(255, 255, 255, 0.24);
+  --glow: rgba(255, 214, 134, 0.95);
+  --shadow: rgba(0, 0, 0, 0.62);
+  --ambient: rgba(240, 196, 117, 0.11);
+  --ambient-cool: rgba(100, 152, 255, 0.11);
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --bg: #f2eee6;
-    --bg-2: #fbf8f2;
-    --fg: #2b2620;
-    --muted: #6f685c;
-    --panel: rgba(255, 252, 246, 0.97);
-    --panel-edge: rgba(0, 0, 0, 0.1);
-    --accent: #9c6a17;
-    --glass-fill: rgba(255, 255, 255, 0.45);
-    --glass-edge: rgba(70, 80, 100, 0.45);
-    --glass-shine: rgba(255, 255, 255, 0.85);
-    --cap: #5c4b3b;
-    --cap-edge: #3e3226;
-    --glow: rgba(214, 140, 30, 0.9);
-    --shadow: rgba(70, 45, 20, 0.32);
-    --ambient: rgba(255, 236, 200, 0.55);
+    --bg: #eef2f8;
+    --bg-2: #f9fbff;
+    --fg: #111827;
+    --muted: #5b677c;
+    --panel: rgba(255, 255, 255, 0.76);
+    --panel-solid: #ffffff;
+    --panel-edge: rgba(15, 23, 42, 0.11);
+    --panel-highlight: rgba(255, 255, 255, 0.92);
+    --accent: #b3741a;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(179, 116, 26, 0.13);
+    --glass-fill: rgba(255, 255, 255, 0.52);
+    --glass-edge: rgba(56, 76, 112, 0.44);
+    --glass-shine: rgba(255, 255, 255, 0.92);
+    --glass-rim: rgba(255, 255, 255, 0.7);
+    --cap: #d8e0ec;
+    --cap-2: #f4f7fc;
+    --cap-edge: rgba(30, 41, 59, 0.24);
+    --cap-shine: rgba(255, 255, 255, 0.95);
+    --glow: rgba(214, 145, 32, 0.88);
+    --shadow: rgba(24, 38, 66, 0.2);
+    --ambient: rgba(240, 194, 112, 0.26);
+    --ambient-cool: rgba(110, 156, 245, 0.16);
   }
 }

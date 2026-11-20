@@ -26,26 +26,34 @@ export function drawCard(clock: HTMLCanvasElement, info: ShareInfo): HTMLCanvasE
   const fg = v('--fg');
   const muted = v('--muted');
   const accent = v('--accent');
+  const ambientCool = v('--ambient-cool') || 'rgba(100,152,255,0.1)';
+  const panelEdge = v('--panel-edge') || 'rgba(255,255,255,0.12)';
 
   const card = document.createElement('canvas');
   card.width = CARD_W;
   card.height = CARD_H;
   const g = card.getContext('2d')!;
 
-  const grad = g.createRadialGradient(CARD_W / 2, CARD_H * 0.35, 0, CARD_W / 2, CARD_H * 0.35, CARD_H * 0.75);
+  const grad = g.createRadialGradient(CARD_W / 2, CARD_H * 0.36, 0, CARD_W / 2, CARD_H * 0.36, CARD_H * 0.78);
   grad.addColorStop(0, bg2);
   grad.addColorStop(1, bg);
   g.fillStyle = grad;
   g.fillRect(0, 0, CARD_W, CARD_H);
 
-  const font = (weight: number, size: number) => `${weight} ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const cool = g.createRadialGradient(CARD_W * 0.22, CARD_H * 0.14, 0, CARD_W * 0.22, CARD_H * 0.14, CARD_W * 0.8);
+  cool.addColorStop(0, ambientCool);
+  cool.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = cool;
+  g.fillRect(0, 0, CARD_W, CARD_H);
+
+  const font = (weight: number, size: number) => `${weight} ${size}px "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'alphabetic';
 
   g.fillStyle = muted;
-  g.font = font(600, 30);
-  g.letterSpacing = '6px';
-  g.fillText('RELOJ DE JUBILACIÓN', CARD_W / 2, 84);
+  g.font = font(600, 28);
+  g.letterSpacing = '7px';
+  g.fillText('RELOJ DE JUBILACIÓN', CARD_W / 2, 82);
   g.letterSpacing = '0px';
 
   g.drawImage(clock, (CARD_W - clock.width) / 2, 100);
@@ -58,19 +66,19 @@ export function drawCard(clock: HTMLCanvasElement, info: ShareInfo): HTMLCanvasE
   g.fillText(info.remaining, CARD_W / 2, 1118);
 
   g.fillStyle = fg;
-  g.font = font(500, 42);
+  g.font = font(500, 40);
   g.fillText(`${info.what} para jubilarme`, CARD_W / 2, 1176);
 
   const barW = 720;
   const barX = (CARD_W - barW) / 2;
   const barY = 1214;
-  g.fillStyle = 'rgba(128,128,128,0.25)';
+  g.fillStyle = panelEdge;
   g.beginPath();
-  g.roundRect(barX, barY, barW, 16, 8);
+  g.roundRect(barX, barY, barW, 14, 7);
   g.fill();
   g.fillStyle = accent;
   g.beginPath();
-  g.roundRect(barX, barY, Math.max(16, barW * Math.min(1, info.fraction)), 16, 8);
+  g.roundRect(barX, barY, Math.max(14, barW * Math.min(1, info.fraction)), 14, 7);
   g.fill();
 
   g.fillStyle = muted;

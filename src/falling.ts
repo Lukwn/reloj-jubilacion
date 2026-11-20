@@ -33,10 +33,6 @@ export function neckOpen(angle: number): boolean {
 /**
  * Avanza el grano `dt` ms con la gravedad en la dirección `angle` (0 = hacia abajo de la
  * rejilla, π/2 = hacia la derecha), la misma convención que `SandSim.gravityAngle`.
- * - Dentro del cuello desliza por el tubo, hacia la boca de abajo (despacio si el reloj está
- *   muy inclinado, pero sin quedarse atascado ni volver atrás).
- * - Fuera del cuello cae libremente hacia donde tira la gravedad, hasta chocar con arena,
- *   con el vidrio o con el cuello.
  * Devuelve la celda donde se posa, o -1 si sigue en el aire.
  */
 export function advanceFall(g: FallingGrain, sim: GrainSim, angle: number, dt: number): number {
@@ -52,7 +48,6 @@ export function advanceFall(g: FallingGrain, sim: GrainSim, angle: number, dt: n
     g.x += (g.lane - g.x) * Math.min(1, dt / 60);
     g.y += g.vy * dt;
     if (g.y < bottomStart) return -1;
-    // Sale por la boca del cuello: desde ahí se comprueba el camino, incluida la primera celda.
     g.inBulb = true;
     fromX = g.x;
     fromY = bottomStart + 0.01;

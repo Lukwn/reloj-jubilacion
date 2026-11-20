@@ -21,10 +21,10 @@ Abre http://localhost:5173. La primera vez te pedirá la fecha de nacimiento, la
 - **Unidad de tiempo** (selector sobre el contador): cada grano puede ser
   - un **día** natural (la de siempre; fines de semana y festivos, algo más claros);
   - un **segundo de trabajo**: el reloj muestra tu jornada de hoy y cae un grano cada segundo, salvo en la comida y fuera de horario. El contador cuenta los segundos de trabajo que te quedan hasta la jubilación. El horario se configura en ajustes (por defecto, de 9:00 a 18:00 con la comida de 14:00 a 15:00);
-  - una **nómina**: el último día laborable de cada mes, con las pagas extra de junio y diciembre en dorado (14 pagas, o 12 si se elige en ajustes);
-  - un **año**: un grano por año natural, que cae en Nochevieja.
+  - una **nómina**: pilas de monedas metálicas en perspectiva 3D con físicas (puedes arrastrarlas, desordenarlas y volver a apilarlas); las pagas extra de junio y diciembre brillan en dorado más claro (14 pagas, o 12 si se elige en ajustes);
+  - un **año**: un tronco de árbol en sección transversal donde cada anillo concéntrico es un año natural, que crece en Nochevieja.
   
-  Con pocos granos (nóminas, años) son canicas con física de verdad: se colocan a tresbolillo, ruedan, se apoyan en el vidrio curvo y la siguiente en caer hace de tapón en el cuello. Cada unidad tiene sus frases, su cuenta atrás, sus hitos y su imagen para compartir; en segundos las capas son por horas, y no hay reproducción ni barra de edad.
+  Cada unidad tiene sus frases, su cuenta atrás, sus hitos y su imagen para compartir; en segundos las capas son por horas, y no hay reproducción ni barra de edad.
 - **Clic o toque en un grano**: muestra su fecha y una frase.
 - **Lupa** (con ratón): al pasar por la arena, una lupa la amplía, recuadra el grano señalado y muestra su fecha (y el resumen del año con las capas activadas). Tras un clic se aparta hasta que el ratón se aleja.
 - **Con ratón, pulsar y arrastrar a un lado**: inclina el reloj entero (se dibuja girado y la gravedad de la arena lo sigue). Al soltarlo vuelve a su sitio. **Doble clic**: una vuelta completa.
@@ -54,7 +54,8 @@ Con `prefers-reduced-motion` no se puede agitar y las animaciones se reducen al 
 - `src/sim.ts`: arena por autómata celular. Cada celda guarda el ID del grano (ID = número de grano: en días, el número de día desde el inicio). Solo se procesan los granos activos, y los demás duermen. El cuello son celdas sólidas: el grano del día lo atraviesa como animación, fuera de la rejilla.
 - `src/countdown.ts`, `src/milestones.ts`: cuenta atrás e hitos (lógica pura, con tests).
 - `src/sound.ts`: sonido con Web Audio. `src/share.ts`: imagen para compartir.
-- `src/marbles.ts`: canicas con física para las unidades con pocos granos (≤ 2000): integración de Verlet en subpasos, choques entre canicas y contra el perfil del vidrio (empuja en perpendicular y con rozamiento), rozamiento estático para que los montones se sostengan y una rejilla de compatibilidad con la misma interfaz que `SandSim` (`GrainSim`).
-- `src/render.ts`: Canvas 2D. La arena se pinta a un píxel por celda, con relieve (más oscura junto al vidrio, más clara en la superficie), y se escala sin suavizado; las canicas, una a una con su sombreado. El vidrio se dibuja con la curva continua del perfil (`profileHalf` en `hourglass.ts`, con la cintura redondeada), no con las filas de la rejilla, y las canicas chocan con esa misma curva. Alrededor: reflejos curvos, borde fino, luz ambiental y sombra en el suelo (`--shadow` y `--ambient` en `src/tokens.css`).
+- `src/coins.ts`: vista de pilas de monedas metálicas 3D con físicas para **nóminas** (sprites en caché con canto estriado, caída con gravedad y rebote en Play, arrastre/desorden sobre la mesa y re-apilado).
+- `src/tree.ts`: vista de anillos de crecimiento de árbol para **años** (silueta orgánica determinista, veta radial, anillo en crecimiento y detalle al pulsar/pasar el ratón).
+- `src/render.ts`: Canvas 2D para el reloj de arena de cristal (días y segundos). La arena se pinta a un píxel por celda, con relieve (más oscura junto al vidrio, más clara en la superficie), y se escala sin suavizado. El vidrio se dibuja con la curva continua del perfil (`profileHalf` en `hourglass.ts`, con la cintura redondeada), reflejos curvos, borde Fresnel, tapas biseladas y sombra en el suelo (`--shadow` y `--ambient` en `src/tokens.css`).
 - Páginas de texto (guía de jubilación, días laborables, preguntas frecuentes, acerca de, privacidad y aviso legal): una carpeta por página con su `index.html`, estilos en `src/pages.css`. La cabecera, el pie, el menú y la URL canónica los inserta un plugin en `vite.config.ts`, donde también están la lista de páginas y los datos del titular. `public/` tiene `robots.txt` y `sitemap.xml`.
 - La configuración y el progreso se guardan en `localStorage`. Si no está disponible, la app funciona igual, solo que sin recordar nada.

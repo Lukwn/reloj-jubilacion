@@ -39,10 +39,8 @@ describe('granos que caen por el cuello', () => {
     const right = drop(0.6);
     const left = drop(-0.6);
     const cx = right.hg.W / 2;
-    // Se posa en el lado hacia el que cae, lejos del eje del reloj.
     expect((right.cell % right.hg.W) + 0.5 - cx).toBeGreaterThan(8);
     expect((left.cell % left.hg.W) + 0.5 - cx).toBeLessThan(-8);
-    // Y la trayectoria en el bulbo sigue la gravedad: Δx/Δy ≈ tan(0.6), no una vertical.
     const inBulb = right.path.filter((p) => p.y >= right.hg.bottomStart + 2);
     const a = inBulb[0];
     const b = inBulb[inBulb.length - 1];

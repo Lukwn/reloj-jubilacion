@@ -63,6 +63,61 @@ export class SandSound {
     }
   }
 
+  private lastCoin = 0;
+
+  /** Tintineo metálico realista de moneda de oro cayendo sobre una pila. */
+  coin(extra = false, strength = 1): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = performance.now();
+    if (now - this.lastCoin < 45) return;
+    this.lastCoin = now;
+    const s = Math.max(0.1, Math.min(1, strength));
+    const t = ctx.currentTime;
+    const pitch = (extra ? 1.14 : 1) * (0.95 + Math.random() * 0.1);
+    // Armónicos inarmónicos propios de una moneda metálica pesada.
+    for (const [freq, amp, dur] of [
+      [2950 * pitch, 1.0, 0.16],
+      [4680 * pitch, 0.55, 0.11],
+      [6820 * pitch, 0.28, 0.065],
+    ]) {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05 * amp * s, t + 0.0025);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.015);
+    }
+  }
+
+  private lastWood = 0;
+
+  /** Toque cálido de madera/marimba al crecer un nuevo anillo de año. */
+  wood(strength = 1): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = performance.now();
+    if (now - this.lastWood < 65) return;
+    this.lastWood = now;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'triangle';
+    const base = 360 + Math.random() * 80;
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.exponentialRampToValueAtTime(base * 0.78, t + 0.14);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.09 * strength, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.22);
+  }
+
   /** Un hito: un arpegio ascendente. */
   chime(): void {
     const ctx = this.ready();
