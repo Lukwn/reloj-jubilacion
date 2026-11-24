@@ -10,18 +10,22 @@ import {
   type Life,
   type LifeConfig,
 } from './dates';
-import { grainPhrase } from './phrases';
+import { grainPhrase, hash32, phraseFor, UNIT_PHRASES } from './phrases';
+import { REGIONS, regionById, regionSummary } from './holidays';
+import { downloadRetirementIcs } from './calendar';
 import {
   buildGrains,
   careerSeconds,
   fallenAt,
   fallenAtDay,
-  fallsAt,
+  formatClock,
   grainTitle,
   grainWhen,
   isUnitId,
   groupLabel,
   jornadaFor,
+  lifeSeconds,
+  lifeSecondsAtDay,
   plural as unitPlural,
   UNIT_IDS,
   UNIT_NAMES,
@@ -35,6 +39,7 @@ import { EMPTY, SandSim, type GrainSim } from './sim';
 import { LENS_RADIUS, Renderer, type HeroDraw, type Point } from './render';
 import { CoinsView, type AltFrame } from './coins';
 import { TreeView } from './tree';
+import { ClepsydraView, type ClepsydraFrame, type ClepsydraPick } from './clepsydra';
 import { advanceFall, neckOpen, startFall, type FallingGrain } from './falling';
 import { motionImpulse, type ShakeImpulse } from './shake';
 import { dimColors, grainColors, unpackColor, yearLayers, type YearLayers } from './colors';
@@ -52,7 +57,6 @@ import {
   loadUnit,
   saveUnit,
 } from './storage';
-import { formatDuration } from './countdown';
 import { milestonesFor, nextMilestone, type Milestone } from './milestones';
 import { SandSound } from './sound';
 import { CLOCK_SIZE, drawCard, SHARE_URL, shareText, toBlob } from './share';
@@ -128,8 +132,8 @@ interface World {
   grains: GrainSet;
   hg: Hourglass | null;
   sim: GrainSim | null;
-  /** Vista dedicada para unidades con pocas instancias (monedas 8-bits en nóminas, anillos de árbol en años). */
-  altView: CoinsView | TreeView | null;
+  /** Vista dedicada para unidades alternativas (clepsidra en segundos, monedas 3D en nóminas, árbol en años). */
+  altView: CoinsView | TreeView | ClepsydraView | null;
   /** Paleta activa: la arena normal o las capas por años. */
   colors: Uint32Array;
   sandColors: Uint32Array;
@@ -175,6 +179,7 @@ let unit: UnitId = loadUnit();
  */
 function lifeKey(cfg: LifeConfig, u: UnitId): string {
   const key: unknown[] = [cfg.workStartDate, cfg.holyThursday ?? true, cfg.easterMonday ?? false, (cfg.extraHolidays ?? '').trim()];
+  if (cfg.region) key.push(cfg.region);
   // Los días eran laborables y ahora son naturales: lo guardado con la versión anterior no vale.
   if (u === 'dias') key.push('naturales');
   if (u === 'nominas') key.push(cfg.pagas === 12 ? 12 : 14);
@@ -203,7 +208,7 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   let hg: Hourglass | null = null;
   let sim: GrainSim | null = null;
   let renderer: Renderer | null = null;
-  let altView: CoinsView | TreeView | null = null;
+  let altView: CoinsView | TreeView | ClepsydraView | null = null;
 
   if (unit === 'nominas') {
     const coins = new CoinsView(canvas, grains, shown);
@@ -216,6 +221,14 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
     }
   } else if (unit === 'anios') {
     altView = new TreeView(canvas, grains, shown, life.startDay);
+    if (topExtra) {
+      altView.topExtra = topExtra;
+      altView.resize();
+    }
+  } else if (unit === 'segundos') {
+    const clepsydra = new ClepsydraView(canvas, life);
+    clepsydra.onDrop = (strength) => sound.drop(strength);
+    altView = clepsydra;
     if (topExtra) {
       altView.topExtra = topExtra;
       altView.resize();
@@ -529,7 +542,7 @@ let lastWakeAll = 0;
 function applyShake(imp: ShakeImpulse): void {
   const w = world;
   if (!w || reducedMotion) return;
-  if (w.altView instanceof CoinsView) {
+  if (w.altView instanceof CoinsView || w.altView instanceof ClepsydraView) {
     w.altView.tremor(imp.intensity);
     return;
   }
@@ -583,7 +596,7 @@ window.addEventListener('deviceorientation', (e) => {
   if (Math.abs(phone) < 0.08) phone = 0;
   const target = phone + 0.5 * Math.sin(phone);
   gyroAngle += angleDelta(gyroAngle, target) * 0.3;
-  if (w.altView instanceof CoinsView) {
+  if (w.altView instanceof CoinsView || w.altView instanceof ClepsydraView) {
     w.altView.setTilt(gyroAngle);
     return;
   }
@@ -667,6 +680,46 @@ function showTooltip(w: World, id: number, cssX: number, cssY: number): void {
   const m = w.milestoneById.get(id);
   tooltipMilestone.hidden = !m;
   if (m) tooltipMilestone.textContent = m.id >= w.landed ? `Hito: ${m.label}` : `Hito alcanzado: ${m.label}`;
+  tooltipEl.hidden = false;
+  const rect = tooltipEl.getBoundingClientRect();
+  let left = cssX + 14;
+  let top = cssY + 14;
+  if (left + rect.width > window.innerWidth - 8) left = cssX - rect.width - 14;
+  if (top + rect.height > window.innerHeight - 8) top = cssY - rect.height - 14;
+  tooltipEl.style.left = `${Math.max(8, left)}px`;
+  tooltipEl.style.top = `${Math.max(8, top)}px`;
+}
+
+function showClepsydraTooltip(w: World, pick: ClepsydraPick, cssX: number, cssY: number): void {
+  const now = new Date();
+  const ls = play ? lifeSecondsAtDay(w.life, play.day) : lifeSeconds(w.life, now);
+  if (pick.kind === 'drop') {
+    const secOfDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    tooltipDate.textContent = play ? `Reproduciendo · ${formatDayLong(Math.floor(play.day))}` : `Ahora mismo · ${formatClock(secOfDay)}`;
+    tooltipWhen.textContent = `Quedan ${formatInt(ls.left)} segundos · llevas ${formatInt(ls.done)}`;
+    const pool = UNIT_PHRASES.segundo;
+    tooltipPhrase.textContent = pool[hash32(ls.done * 31 + 7) % pool.length];
+    tooltipYear.hidden = true;
+  } else {
+    tooltipDate.textContent = formatDayLong(pick.day);
+    const diffDays = pick.day - w.today;
+    const diffSecs = Math.abs(diffDays) * 86_400;
+    tooltipWhen.textContent =
+      diffDays === 0
+        ? 'Hoy'
+        : diffDays > 0
+          ? `Dentro de ~${formatInt(diffSecs)} segundos (${formatInt(diffDays)} días)`
+          : `Hace ~${formatInt(diffSecs)} segundos (${formatInt(-diffDays)} días)`;
+    tooltipPhrase.textContent = phraseFor(pick.day, {
+      today: w.today,
+      birthDay: w.life.birthDay,
+      lastDay: w.life.retireDay - 1,
+      isWorkday: w.life.isWorkday,
+    });
+    tooltipYear.textContent = `Año ${pick.year}`;
+    tooltipYear.hidden = !layersOn;
+  }
+  tooltipMilestone.hidden = true;
   tooltipEl.hidden = false;
   const rect = tooltipEl.getBoundingClientRect();
   let left = cssX + 14;
@@ -788,9 +841,15 @@ function setLayers(on: boolean): void {
   hideLens();
   if (world) applyPalette(world);
   if (on) {
-    const what = unit === 'segundos' ? 'una hora' : 'un año';
-    const target = unit === 'nominas' ? 'una moneda' : unit === 'anios' ? 'un anillo' : 'la arena';
-    showHint(`Cada color es ${what} · pasa por encima o toca ${target} para ver cuál`);
+    const target =
+      unit === 'nominas'
+        ? 'una moneda'
+        : unit === 'anios'
+          ? 'un anillo'
+          : unit === 'segundos'
+            ? 'el agua'
+            : 'la arena';
+    showHint(`Cada color es un año · pasa por encima o toca ${target} para ver cuál`);
   }
 }
 
@@ -879,7 +938,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const w = world;
   if (!w) return;
-  // En pilas de monedas (nóminas) y anillos de árbol (años): arrastrar coge/desordena monedas y pasar el ratón resalta.
+  // En vistas alternativas (clepsidra en segundos, monedas 3D en nóminas, anillos de árbol en años).
   if (w.altView) {
     if (press && e.pointerId === press.pointerId && w.altView instanceof CoinsView) {
       if (!press.dragging) {
@@ -895,11 +954,30 @@ canvas.addEventListener('pointermove', (e) => {
       press.last = { x: e.clientX, y: e.clientY };
       return;
     }
+    if (press && e.pointerId === press.pointerId && w.altView instanceof ClepsydraView) {
+      if (!press.dragging) {
+        if (Math.hypot(e.clientX - press.x0, e.clientY - press.y0) < DRAG_START_PX) return;
+        press.dragging = true;
+        hideTooltip();
+        canvas.classList.add('removiendo');
+        w.altView.beginTilt();
+        press.last = { x: press.x0, y: press.y0 };
+      }
+      w.altView.dragTilt(e.clientX - press.x0, e.clientX - press.last.x);
+      press.last = { x: e.clientX, y: e.clientY };
+      return;
+    }
     if (e.pointerType === 'mouse') {
-      const id = w.altView.pick(e.clientX, e.clientY);
-      hoverAltId = id;
-      hoverYear = layersOn && id >= 0 ? w.layers.yearOf[id] : -1;
-      canvas.classList.toggle('moneda-cogible', w.altView instanceof CoinsView && id >= 0);
+      if (w.altView instanceof ClepsydraView) {
+        const info = w.altView.pickInfo(e.clientX, e.clientY);
+        hoverYear = layersOn && info?.kind === 'day' ? info.year : -1;
+        canvas.classList.toggle('moneda-cogible', !!info);
+      } else {
+        const id = w.altView.pick(e.clientX, e.clientY);
+        hoverAltId = id;
+        hoverYear = layersOn && id >= 0 ? w.layers.yearOf[id] : -1;
+        canvas.classList.toggle('moneda-cogible', w.altView instanceof CoinsView && id >= 0);
+      }
     }
     return;
   }
@@ -961,7 +1039,17 @@ function endPress(e: PointerEvent, tap: boolean): void {
     updateSortButton();
     return;
   }
+  if (w?.altView instanceof ClepsydraView && p.dragging) {
+    w.altView.endTilt();
+    return;
+  }
   if (!w || !tap || p.dragging) return;
+  if (w.altView instanceof ClepsydraView) {
+    const info = w.altView.pickInfo(p.x0, p.y0);
+    if (!info) hideTooltip();
+    else showClepsydraTooltip(w, info, p.x0, p.y0);
+    return;
+  }
   // Un toque sin arrastre: muestra el grano, moneda o anillo que hay debajo.
   const id = pickGrain(w, p.x0, p.y0, p.touch);
   if (id < 0) {
@@ -977,7 +1065,7 @@ function endPress(e: PointerEvent, tap: boolean): void {
 }
 
 canvas.addEventListener('pointerup', (e) => endPress(e, true));
-// Doble clic: vuelta completa en el reloj de arena, o apilar/sacudir las pilas de monedas.
+// Doble clic: vuelta completa en el reloj de arena, olas en la clepsidra o apilar/sacudir monedas.
 canvas.addEventListener('dblclick', () => {
   if (!world || reducedMotion) return;
   if (world.altView instanceof CoinsView) {
@@ -985,6 +1073,11 @@ canvas.addEventListener('dblclick', () => {
     if (world.altView.hasMessyCoins()) world.altView.tidy();
     else world.altView.tremor(1);
     updateSortButton();
+    return;
+  }
+  if (world.altView instanceof ClepsydraView) {
+    hideTooltip();
+    world.altView.tremor(1);
     return;
   }
   if (!world.sim) return;
@@ -1058,13 +1151,43 @@ function updateCounter(): void {
  */
 function remainingNow(w: World): { remaining: number; done: number; fraction: number } {
   if (w.unit === 'segundos') {
-    const { left, total } = careerSeconds(w.life, w.grains.window!.jornada, new Date());
-    return { remaining: left, done: total - left, fraction: 1 - left / total };
+    const ls = play ? lifeSecondsAtDay(w.life, play.day) : lifeSeconds(w.life, new Date());
+    return { remaining: ls.left, done: ls.done, fraction: ls.fraction };
   }
   return { remaining: w.grains.total - w.landed, done: w.landed, fraction: w.landed / w.grains.total };
 }
 
 // ---------------------------------------------------------------- ajustes
+
+const regionSelect = form.elements.namedItem('region') as HTMLSelectElement;
+const regionNote = $('nota-comunidad');
+for (const reg of REGIONS) {
+  const opt = document.createElement('option');
+  opt.value = reg.id;
+  opt.textContent = reg.name;
+  regionSelect.append(opt);
+}
+
+function updateRegionNote(regionId: string): void {
+  const reg = regionById(regionId);
+  if (reg) {
+    regionNote.textContent = regionSummary(reg);
+    regionNote.hidden = false;
+  } else {
+    regionNote.textContent = '';
+    regionNote.hidden = true;
+  }
+}
+
+regionSelect.addEventListener('change', () => {
+  const reg = regionById(regionSelect.value);
+  if (reg) {
+    const f = form.elements as unknown as Record<string, HTMLInputElement>;
+    f.holyThursday.checked = reg.holyThursday;
+    f.easterMonday.checked = reg.easterMonday;
+  }
+  updateRegionNote(regionSelect.value);
+});
 
 function openSettings(): void {
   const cfg = world?.cfg ?? loadConfig();
@@ -1072,6 +1195,8 @@ function openSettings(): void {
   f.birthDate.value = cfg?.birthDate ?? '';
   f.retirementAge.value = String(cfg?.retirementAge ?? 67);
   f.workStartDate.value = cfg?.workStartDate ?? '';
+  regionSelect.value = cfg?.region ?? '';
+  updateRegionNote(regionSelect.value);
   f.holyThursday.checked = cfg?.holyThursday ?? true;
   f.easterMonday.checked = cfg?.easterMonday ?? false;
   f.extraHolidays.value = cfg?.extraHolidays ?? '';
@@ -1107,6 +1232,7 @@ form.addEventListener('submit', (e) => {
     birthDate: f.birthDate.value,
     retirementAge: Number(f.retirementAge.value),
     workStartDate: f.workStartDate.value,
+    region: regionSelect.value || undefined,
     holyThursday: f.holyThursday.checked,
     easterMonday: f.easterMonday.checked,
     extraHolidays: f.extraHolidays.value.trim(),
@@ -1182,17 +1308,22 @@ function updateCountdown(): void {
   const w = world;
   let line = '';
   if (w && !play) {
-    line = unitCountdown(w.grains, w.life, new Date()) ?? '';
-    // Cada 8 s se alterna con el próximo hito.
-    const next = nextMilestone(w.milestones, w.landed);
-    if (next && Math.floor(Date.now() / 8000) % 2 === 1) {
-      const n = next.id + 1 - w.landed;
-      // En segundos la comida para el reloj: mejor decir cuándo cae que cuántos granos faltan.
-      const when =
-        w.unit === 'segundos'
-          ? `dentro de ${formatDuration(fallsAt(w.grains, next.id) - Date.now())}`
-          : `dentro de ${unitPlural(n, w.unit)}`;
-      line = n === 1 ? `Próximo hito: ${next.short}, con el próximo grano` : `Próximo hito: ${next.short}, ${when}`;
+    if (w.unit === 'segundos') {
+      const now = new Date();
+      const { left: workLeft } = careerSeconds(w.life, w.grains.window!.jornada, now);
+      line =
+        Math.floor(Date.now() / 8000) % 2 === 0
+          ? `De jornada laboral: quedan ${formatInt(workLeft)} segundos de trabajo`
+          : 'Cada gota es un segundo de tu vida laboral · 24 h al día';
+    } else {
+      line = unitCountdown(w.grains, w.life, new Date()) ?? '';
+      // Cada 8 s se alterna con el próximo hito.
+      const next = nextMilestone(w.milestones, w.landed);
+      if (next && Math.floor(Date.now() / 8000) % 2 === 1) {
+        const n = next.id + 1 - w.landed;
+        const when = `dentro de ${unitPlural(n, w.unit)}`;
+        line = n === 1 ? `Próximo hito: ${next.short}, con el próximo grano` : `Próximo hito: ${next.short}, ${when}`;
+      }
     }
   }
   if (countdownEl.textContent !== line) countdownEl.textContent = line;
@@ -1221,11 +1352,12 @@ let dugSinceFrame = 0;
 
 /** Los granos con id >= ageCutoff se ven transparentes mientras el panel está abierto. */
 let ageCutoff = -1;
+/** Fracción de corte en la clepsidra (segundos) cuando se previsualiza otra edad de jubilación. */
+let ageCutoffFraction = -1;
 
 function openAgePanel(): void {
   const w = world;
-  // En segundos el reloj es solo la jornada de hoy: la edad de jubilación no cambia nada en él.
-  if (!w || play || w.unit === 'segundos') return;
+  if (!w || play) return;
   const cur = w.cfg.retirementAge;
   ageInput.min = String(Math.max(40, Math.min(60, cur)));
   ageInput.max = String(Math.min(90, Math.max(70, cur)));
@@ -1240,6 +1372,7 @@ function closeAgePanel(): void {
   agePanel.hidden = true;
   ageBtn.setAttribute('aria-expanded', 'false');
   ageCutoff = -1;
+  ageCutoffFraction = -1;
 }
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -1255,9 +1388,30 @@ function updateAgePreview(): void {
     ageText.textContent = error;
     ageUse.disabled = true;
     ageCutoff = -1;
+    ageCutoffFraction = -1;
     return;
   }
   const life = buildLife(cfg);
+  if (w.unit === 'segundos') {
+    const now = new Date();
+    const curSecs = lifeSeconds(w.life, now);
+    const altSecs = lifeSeconds(life, now);
+    const when = `Te jubilarías el ${lowerFirst(formatDayLong(life.retireDay))}.`;
+    if (altSecs.left <= 0) {
+      ageText.textContent = `A los ${age} ya te habrías jubilado: toda el agua de arriba sobraría.`;
+      ageUse.disabled = true;
+      ageCutoffFraction = curSecs.fraction;
+      return;
+    }
+    const diff = altSecs.total - curSecs.total;
+    ageUse.disabled = age === w.cfg.retirementAge;
+    ageCutoffFraction = diff < 0 ? altSecs.total / curSecs.total : -1;
+    const ahead = `${formatInt(altSecs.left)} segundos por delante`;
+    if (diff === 0) ageText.textContent = `${ahead}. Es tu edad actual. ${when}`;
+    else if (diff < 0) ageText.textContent = `${ahead}: ${formatInt(-diff)} menos. La zona atenuada es lo que te ahorrarías. ${when}`;
+    else ageText.textContent = `${ahead}: ${formatInt(diff)} más. ${when}`;
+    return;
+  }
   const alt = buildGrains(life, cfg, w.unit);
   if (fallenAtDay(alt, w.today) >= alt.total) {
     ageText.textContent = `A los ${age} ya te habrías jubilado: toda la arena de arriba sobraría.`;
@@ -1280,6 +1434,14 @@ function updateAgePreview(): void {
 ageBtn.addEventListener('click', () => (agePanel.hidden ? openAgePanel() : closeAgePanel()));
 ageClose.addEventListener('click', closeAgePanel);
 ageInput.addEventListener('input', updateAgePreview);
+$('btn-edad-calendario').addEventListener('click', () => {
+  const w = world;
+  if (!w) return;
+  const age = Number(ageInput.value);
+  const cfg: LifeConfig = { ...w.cfg, retirementAge: age };
+  if (validateConfig(cfg)) return;
+  downloadRetirementIcs(buildLife(cfg), age);
+});
 ageUse.addEventListener('click', () => {
   const w = world;
   if (!w) return;
@@ -1314,7 +1476,22 @@ function openShare(): void {
     fraction,
   };
   let clock: HTMLCanvasElement;
-  if (w.altView) {
+  if (w.altView instanceof ClepsydraView) {
+    const ls = lifeSeconds(w.life, new Date());
+    const cFrame: ClepsydraFrame = {
+      time: performance.now(),
+      fraction: ls.fraction,
+      doneSec: ls.done,
+      totalSec: ls.total,
+      subSec: 0.65,
+      playSpeed: 0,
+      layersOn,
+      highlightYear: -1,
+      cutoffFraction: -1,
+      reducedMotion: true,
+    };
+    clock = w.altView.snapshot(CLOCK_SIZE.width, CLOCK_SIZE.height, cFrame).canvas;
+  } else if (w.altView) {
     const altFrame: AltFrame = {
       time: performance.now(),
       landed: w.landed,
@@ -1360,6 +1537,12 @@ shareCopy.addEventListener('click', () => {
     ?.writeText(shareMessage)
     .then(() => (shareStatus.textContent = 'Texto copiado. Pégalo junto a la imagen.'))
     .catch(() => (shareStatus.textContent = shareMessage));
+});
+$('btn-compartir-calendario').addEventListener('click', () => {
+  const w = world;
+  if (!w) return;
+  downloadRetirementIcs(w.life, w.cfg.retirementAge);
+  shareStatus.textContent = 'Evento de calendario (.ics) descargado.';
 });
 shareClose.addEventListener('click', () => shareDialog.close());
 
@@ -1414,8 +1597,7 @@ function openPlayPanel(): void {
 
 function startPlay(fromStart: boolean): void {
   const w = world;
-  // En segundos el reloj es solo la jornada de hoy: no hay años que reproducir.
-  if (!w || w.unit === 'segundos') return;
+  if (!w) return;
   hideTooltip();
   hideLens();
   closeAgePanel();
@@ -1423,7 +1605,7 @@ function startPlay(fromStart: boolean): void {
   if (play) hideMilestone();
   play = { day: fromStart ? w.life.startDay : localDayNumber(), paused: false, done: false, lastFrame: now, celebrated: -1 };
   openPlayPanel();
-  // Desde el principio: toda la arena arriba, como el primer día de tu vida laboral.
+  // Desde el principio: todo arriba, como el primer día de tu vida laboral.
   if (fromStart) createWorld(w.cfg, 0);
   updatePlayControls();
 }
@@ -1535,6 +1717,8 @@ function frame(now: number): void {
   tick(now);
 }
 
+let lastShownLifeSec = -1;
+
 function tick(now: number): void {
   fpsFrames++;
   if (now - fpsSince >= 1000) {
@@ -1546,20 +1730,38 @@ function tick(now: number): void {
 
   const w = world;
   if (!w) return;
-  // En segundos el objetivo avanza con el reloj del sistema, no a medianoche.
-  if (!play && w.unit === 'segundos') {
-    const target = fallenAt(w.grains, new Date());
-    if (target !== w.target) {
-      w.target = target;
-      updateCounter();
-    }
-  }
   updatePlay(w, now);
   // Un aviso de la reproducción nunca sobrevive a ella.
   if (!play && !milestoneEl.hidden && milestoneEl.classList.contains('en-reproduccion')) hideMilestone();
+
+  // Clepsidra de cristal (segundos naturales 24/7 de toda la vida laboral).
+  if (w.altView instanceof ClepsydraView) {
+    sound.setActivity(0);
+    canvas.classList.remove('con-lupa');
+    const ls = play ? lifeSecondsAtDay(w.life, play.day) : lifeSeconds(w.life, new Date());
+    if (ls.done !== lastShownLifeSec) {
+      lastShownLifeSec = ls.done;
+      updateCounter();
+    }
+    const playSpeed = play && !play.paused && !play.done ? SPEEDS[speedIdx][0] : 0;
+    w.altView.draw({
+      time: now,
+      fraction: ls.fraction,
+      doneSec: ls.done,
+      totalSec: ls.total,
+      subSec: ls.subSec,
+      playSpeed,
+      layersOn,
+      highlightYear: layersOn ? hoverYear : -1,
+      cutoffFraction: ageCutoffFraction,
+      reducedMotion,
+    });
+    return;
+  }
+
   updateDrops(w, now);
 
-  // Vistas alternativas (pilas de monedas 8-bits en nóminas, anillos de árbol en años).
+  // Vistas alternativas (pilas de monedas 3D en nóminas, anillos de árbol en años).
   if (w.altView) {
     sound.setActivity(0);
     canvas.classList.remove('con-lupa');
@@ -1676,7 +1878,8 @@ const unitBox = $('unidades');
 const unitButtons = [...unitBox.querySelectorAll<HTMLButtonElement>('[data-unidad]')];
 
 const unitHint = (u: UnitId) => {
-  if (u === 'nominas') return 'Cada moneda es una nómina · arrastra para moverlas o desordenarlas · doble clic para volver a apilar';
+  if (u === 'segundos') return 'Cada gota es un segundo de tu vida laboral · arrastra para inclinar el reloj · toca un nivel para ver su fecha';
+  if (u === 'nominas') return 'Cada moneda es una nómina · arrastra para moverlas o apilarlas entre sí · doble clic para ordenar';
   if (u === 'anios') return 'Cada anillo del árbol es un año de tu vida laboral · toca uno para ver su frase';
   return `Cada grano es ${UNIT_NAMES[u].grain} · toca uno para verlo · arrastra o agita para remover la arena`;
 };
@@ -1688,14 +1891,11 @@ function updateUnitUi(): void {
     b.setAttribute('aria-checked', String(on));
     b.tabIndex = on ? 0 : -1;
   }
-  const live = unit === 'segundos';
-  // En segundos el reloj es solo la jornada de hoy: ni reproducción ni edad de jubilación.
-  if (!play) playBtn.hidden = live;
-  ageBtn.setAttribute('aria-disabled', String(live));
-  ageBtn.title = live ? 'Segundos de trabajo que te quedan hasta la jubilación' : '¿Y si me jubilo a otra edad?';
-  const layersName = live ? 'Capas por horas' : 'Capas por años';
-  layersBtn.title = layersName;
-  layersBtn.setAttribute('aria-label', layersName);
+  if (!play) playBtn.hidden = false;
+  ageBtn.setAttribute('aria-disabled', 'false');
+  ageBtn.title = '¿Y si me jubilo a otra edad?';
+  layersBtn.title = 'Capas por años';
+  layersBtn.setAttribute('aria-label', 'Capas por años');
 }
 
 function setUnit(u: UnitId): void {
@@ -1759,6 +1959,11 @@ if (import.meta.env.DEV) {
     },
     /** Inclina el reloj dibujado como al arrastrar con el ratón (sin soltar); null lo suelta. */
     viewTo: (deg: number | null) => {
+      if (world?.altView instanceof ClepsydraView) {
+        if (deg === null) world.altView.endTilt();
+        else world.altView.setDragAngle((deg * Math.PI) / 180);
+        return;
+      }
       tilting = deg !== null;
       if (deg !== null) tiltTarget = (deg * Math.PI) / 180;
     },

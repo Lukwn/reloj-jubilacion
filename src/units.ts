@@ -40,11 +40,11 @@ export interface UnitNames {
 export const UNIT_NAMES: Record<UnitId, UnitNames> = {
   dias: { one: 'día', many: 'días', label: 'Días', grain: 'un día de tu vida laboral', done: 'pasados' },
   segundos: {
-    one: 'segundo de trabajo',
-    many: 'segundos de trabajo',
+    one: 'segundo',
+    many: 'segundos',
     label: 'Segundos',
-    grain: 'un segundo de tu jornada de hoy',
-    done: 'trabajados',
+    grain: 'un segundo de tu vida laboral',
+    done: 'pasados',
   },
   nominas: { one: 'nómina', many: 'nóminas', label: 'Nóminas', grain: 'una nómina', done: 'cobradas' },
   anios: { one: 'año', many: 'años', label: 'Años', grain: 'un año', done: 'trabajados' },
@@ -133,6 +133,44 @@ export function careerSeconds(life: Life, j: Jornada, now: Date): { left: number
   let left = (life.total - i) * per;
   if (i < life.total && life.workDays[i] === today) left -= workedSecondsAt(j, secondOfDay(now));
   return { left, total: life.total * per };
+}
+
+export interface LifeSeconds {
+  total: number;
+  done: number;
+  left: number;
+  fraction: number;
+  /** Progreso dentro del segundo actual (0..1), para animar la gota en directo. */
+  subSec: number;
+}
+
+/** Todos los segundos naturales de tu vida laboral (24/7, nunca se detiene). */
+export function lifeSeconds(life: Life, now: Date = new Date()): LifeSeconds {
+  const total = Math.max(1, (life.retireDay - life.startDay) * 86_400);
+  const rawDone = (localDayNumber(now) - life.startDay) * 86_400 + secondOfDay(now);
+  const done = Math.max(0, Math.min(total, rawDone));
+  const left = total - done;
+  return {
+    total,
+    done,
+    left,
+    fraction: done / total,
+    subSec: done < total ? now.getMilliseconds() / 1000 : 0,
+  };
+}
+
+/** Segundos naturales en un día fraccionario concreto (para el modo Play). */
+export function lifeSecondsAtDay(life: Life, dayFloat: number): LifeSeconds {
+  const total = Math.max(1, (life.retireDay - life.startDay) * 86_400);
+  const exact = Math.max(0, Math.min(total, (dayFloat - life.startDay) * 86_400));
+  const done = Math.floor(exact);
+  return {
+    total,
+    done,
+    left: total - done,
+    fraction: exact / total,
+    subSec: exact - done,
+  };
 }
 
 // ---------------------------------------------------------------- granos

@@ -1,7 +1,62 @@
-// Días laborables: de lunes a viernes, sin festivos nacionales de España ni los que añada el usuario.
-// Todas las fechas son números de día civil (ver dates.ts).
+// Días laborables: de lunes a viernes, sin festivos nacionales de España, los de la comunidad
+// autónoma elegida ni los que añada el usuario. Todas las fechas son números de día civil (ver dates.ts).
+
+export interface RegionPreset {
+  id: string;
+  name: string;
+  holyThursday: boolean;
+  easterMonday: boolean;
+  /** Festivos autonómicos fijos anuales [mes, día]. */
+  fixed: ReadonlyArray<readonly [month: number, day: number]>;
+  /** Festivos autonómicos móviles respecto al Domingo de Pascua (p. ej. +60 = Corpus Christi). */
+  easterOffsets?: readonly number[];
+}
+
+/** Comunidades y ciudades autónomas de España con sus festivos autonómicos habituales. */
+export const REGIONS: ReadonlyArray<RegionPreset> = [
+  { id: 'andalucia', name: 'Andalucía', holyThursday: true, easterMonday: false, fixed: [[2, 28]] },
+  { id: 'aragon', name: 'Aragón', holyThursday: true, easterMonday: false, fixed: [[4, 23]] },
+  { id: 'asturias', name: 'Asturias', holyThursday: true, easterMonday: false, fixed: [[9, 8]] },
+  { id: 'baleares', name: 'Illes Balears', holyThursday: true, easterMonday: true, fixed: [[3, 1], [12, 26]] },
+  { id: 'canarias', name: 'Canarias', holyThursday: true, easterMonday: false, fixed: [[5, 30]] },
+  { id: 'cantabria', name: 'Cantabria', holyThursday: true, easterMonday: true, fixed: [[7, 28], [9, 15]] },
+  { id: 'castilla-la-mancha', name: 'Castilla-La Mancha', holyThursday: true, easterMonday: false, fixed: [[5, 31]], easterOffsets: [60] },
+  { id: 'castilla-y-leon', name: 'Castilla y León', holyThursday: true, easterMonday: false, fixed: [[4, 23]] },
+  { id: 'cataluna', name: 'Cataluña', holyThursday: false, easterMonday: true, fixed: [[6, 24], [9, 11], [12, 26]] },
+  { id: 'ceuta', name: 'Ceuta', holyThursday: true, easterMonday: false, fixed: [[8, 5], [9, 2]] },
+  { id: 'valencia', name: 'Comunitat Valenciana', holyThursday: false, easterMonday: true, fixed: [[3, 19], [6, 24], [10, 9]] },
+  { id: 'extremadura', name: 'Extremadura', holyThursday: true, easterMonday: false, fixed: [[9, 8]] },
+  { id: 'galicia', name: 'Galicia', holyThursday: true, easterMonday: false, fixed: [[5, 17], [7, 25]] },
+  { id: 'madrid', name: 'Comunidad de Madrid', holyThursday: true, easterMonday: false, fixed: [[5, 2]] },
+  { id: 'melilla', name: 'Melilla', holyThursday: true, easterMonday: false, fixed: [[9, 17]] },
+  { id: 'murcia', name: 'Región de Murcia', holyThursday: true, easterMonday: false, fixed: [[3, 19], [6, 9]] },
+  { id: 'navarra', name: 'Navarra', holyThursday: true, easterMonday: true, fixed: [[7, 25], [12, 3]] },
+  { id: 'pais-vasco', name: 'País Vasco', holyThursday: true, easterMonday: true, fixed: [[7, 25]] },
+  { id: 'la-rioja', name: 'La Rioja', holyThursday: true, easterMonday: true, fixed: [[6, 9]] },
+];
+
+const REGION_MAP = new Map(REGIONS.map((r) => [r.id, r]));
+
+export function regionById(id: string | undefined): RegionPreset | null {
+  if (!id) return null;
+  return REGION_MAP.get(id) ?? null;
+}
+
+/** Resumen legible de los festivos autonómicos que añade una comunidad. */
+export function regionSummary(region: RegionPreset): string {
+  const parts: string[] = region.fixed.map(
+    ([m, d]) => `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`,
+  );
+  if (region.easterOffsets?.includes(60)) parts.push('Corpus Christi');
+  if (region.holyThursday && region.easterMonday) parts.push('Jueves Santo y Lunes de Pascua');
+  else if (region.holyThursday) parts.push('Jueves Santo');
+  else if (region.easterMonday) parts.push('Lunes de Pascua');
+  return `Incluye automáticamente: ${parts.join(', ')}.`;
+}
 
 export interface HolidayOptions {
+  /** Comunidad autónoma opcional (añade sus festivos fijos habituales). */
+  region?: string;
   /** Jueves Santo (festivo en casi todas las comunidades salvo Cataluña y C. Valenciana). */
   holyThursday: boolean;
   /** Lunes de Pascua (Cataluña, C. Valenciana, Navarra, País Vasco, La Rioja…). */
@@ -75,6 +130,13 @@ export function holidaysOfYear(year: number, opts: HolidayOptions): Set<number> 
   set.add(easter - 2); // Viernes Santo
   if (opts.holyThursday) set.add(easter - 3);
   if (opts.easterMonday) set.add(easter + 1);
+  const reg = regionById(opts.region);
+  if (reg) {
+    for (const [m, d] of reg.fixed) if (d <= daysIn(year, m)) set.add(dayOf(year, m, d));
+    if (reg.easterOffsets) {
+      for (const off of reg.easterOffsets) set.add(easter + off);
+    }
+  }
   const extra = parseExtraHolidays(opts.extra);
   if (typeof extra !== 'string') {
     for (const [m, d] of extra.recurring) if (d <= daysIn(year, m)) set.add(dayOf(year, m, d));

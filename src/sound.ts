@@ -118,6 +118,30 @@ export class SandSound {
     osc.stop(t + 0.22);
   }
 
+  private lastDrop = 0;
+
+  /** «Plip» cristalino de una gota al caer en el agua (resonancia de burbuja Minnaert). */
+  drop(strength = 1): void {
+    const ctx = this.ready();
+    if (!ctx) return;
+    const now = performance.now();
+    if (now - this.lastDrop < 85) return;
+    this.lastDrop = now;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    const base = 540 + Math.random() * 140;
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.exponentialRampToValueAtTime(base * 2.15, t + 0.058);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.065 * Math.min(1, strength), t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.095);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.11);
+  }
+
   /** Un hito: un arpegio ascendente. */
   chime(): void {
     const ctx = this.ready();

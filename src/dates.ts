@@ -17,6 +17,8 @@ export interface LifeConfig {
   birthDate: string; // AAAA-MM-DD
   retirementAge: number;
   workStartDate: string; // AAAA-MM-DD
+  /** Comunidad autónoma opcional (ver REGIONS en holidays.ts). */
+  region?: string;
   holyThursday?: boolean; // por defecto, sí
   easterMonday?: boolean; // por defecto, no
   extraHolidays?: string; // "24/06, 09/11/2027"
@@ -45,6 +47,7 @@ const MAX_SPAN_DAYS = 60_000;
 
 export function holidayOptions(cfg: LifeConfig): HolidayOptions {
   return {
+    region: cfg.region || undefined,
     holyThursday: cfg.holyThursday ?? true,
     easterMonday: cfg.easterMonday ?? false,
     extra: cfg.extraHolidays ?? '',

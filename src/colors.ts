@@ -64,7 +64,7 @@ export function unpackColor(c: number): string {
 }
 
 /** Tonos de arena de colores (h, s, l) para las capas por años. Dos años seguidos nunca se repiten. */
-const LAYER_TONES: ReadonlyArray<[number, number, number]> = [
+export const LAYER_TONES: ReadonlyArray<[number, number, number]> = [
   [38, 0.58, 0.64], // ocre
   [14, 0.55, 0.58], // terracota
   [95, 0.24, 0.58], // salvia

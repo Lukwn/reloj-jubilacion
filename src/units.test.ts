@@ -12,6 +12,8 @@ import {
   grainWhen,
   jornadaFor,
   jornadaSeconds,
+  lifeSeconds,
+  lifeSecondsAtDay,
   unitCountdown,
   windowDayFor,
   workedSecondOfDay,
@@ -154,6 +156,19 @@ describe('segundos', () => {
     // Cada segundo de jornada, uno menos; en la comida, ninguno.
     expect(careerSeconds(life, J, new Date(2026, 9, 14, 11, 0, 1)).left).toBe(left - 1);
     expect(careerSeconds(life, J, new Date(2026, 9, 14, 14, 10)).left).toBe(careerSeconds(life, J, new Date(2026, 9, 14, 14, 50)).left);
+  });
+
+  it('segundos naturales de toda la vida laboral (24/7, nunca se detiene)', () => {
+    const a = lifeSeconds(life, new Date(2026, 9, 14, 22, 30, 10, 500));
+    const b = lifeSeconds(life, new Date(2026, 9, 14, 22, 30, 11, 200));
+    expect(a.total).toBe((life.retireDay - life.startDay) * 86_400);
+    expect(a.done + a.left).toBe(a.total);
+    expect(b.done).toBe(a.done + 1);
+    expect(b.left).toBe(a.left - 1);
+    expect(a.subSec).toBeCloseTo(0.5, 2);
+
+    const mid = lifeSecondsAtDay(life, (life.startDay + life.retireDay) / 2);
+    expect(mid.fraction).toBeCloseTo(0.5, 4);
   });
 
   it('frases según la hora: primera hora, antes y después de comer, último minuto', () => {

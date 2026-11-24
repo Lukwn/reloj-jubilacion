@@ -158,19 +158,23 @@ export class CoinsView {
   private floorY: Float32Array;
   /** Retardo de retorno escalonado al volver a apilar (ms). */
   private returnDelay: Float32Array;
+  /** ID de la moneda suelta sobre la que está apilada esta moneda (-1 = sobre la mesa). */
+  private parent: Int32Array;
+  /** Ligero desplazamiento horizontal respecto a la moneda inferior al apilar a mano. */
+  private stackOffX: Float32Array;
 
   // Estado del arrastre con ratón o dedo.
   private dragIds: number[] = [];
   private dragOffX: number[] = [];
   private dragOffY: number[] = [];
-  private dragStartX = 0;
-  private dragStartY = 0;
   private dragPtrX = 0;
   private dragPtrY = 0;
   private dragVx = 0;
   private dragVy = 0;
   private dragLastMoveAt = 0;
   private swiping = false;
+  /** Moneda suelta resaltada como destino de apilado mientras arrastras. */
+  private snapPreviewId = -1;
 
   private isLight = false;
   private prevLanded = 0;
@@ -202,6 +206,8 @@ export class CoinsView {
     this.vrot = new Float32Array(n);
     this.floorY = new Float32Array(n);
     this.returnDelay = new Float32Array(n);
+    this.parent = new Int32Array(n).fill(-1);
+    this.stackOffX = new Float32Array(n);
     this.assignStacks();
     this.refreshTheme();
     this.resize();
@@ -279,8 +285,79 @@ export class CoinsView {
       this.vrot[id] = 0;
       this.floorY[id] = this.stacks[this.geom[id].stackIdx].by;
       this.returnDelay[id] = 0;
+      this.parent[id] = -1;
+      this.stackOffX[id] = 0;
     }
+    this.snapPreviewId = -1;
     this.reportMessy(false);
+  }
+
+  /** Devuelve la moneda raíz (sobre la mesa) de una pila libre formada por el usuario. */
+  private looseRoot(id: number): number {
+    let cur = id;
+    for (let guard = 0; guard < 128; guard++) {
+      const p = this.parent[cur];
+      if (p < 0 || this.mode[p] !== MODE_LOOSE) return cur;
+      cur = p;
+    }
+    return cur;
+  }
+
+  /** Profundidad (0 = en mesa, 1 = sobre 1 moneda, ...) dentro de una pila libre. */
+  private looseDepth(id: number): number {
+    let d = 0;
+    let cur = id;
+    for (let guard = 0; guard < 128; guard++) {
+      const p = this.parent[cur];
+      if (p < 0 || this.mode[p] !== MODE_LOOSE) return d;
+      cur = p;
+      d++;
+    }
+    return d;
+  }
+
+  /** Moneda directamente apoyada encima de `id` en una pila libre, o -1. */
+  private looseChildOf(id: number): number {
+    for (let cid = 0; cid < this.prevLanded; cid++) {
+      if (this.mode[cid] === MODE_LOOSE && this.parent[cid] === id) return cid;
+    }
+    return -1;
+  }
+
+  /** Cadena ordenada de monedas apiladas por encima de `id` en una pila libre. */
+  private looseChainAbove(id: number): number[] {
+    const out: number[] = [];
+    let cur = id;
+    for (let guard = 0; guard < 128; guard++) {
+      const child = this.looseChildOf(cur);
+      if (child < 0) break;
+      out.push(child);
+      cur = child;
+    }
+    return out;
+  }
+
+  /** Busca la moneda suelta superior más cercana bajo (x, y) sobre la que se pueda apilar. */
+  private findLooseSnapTarget(x: number, y: number, exclude: Set<number>): number {
+    let best = -1;
+    let bestScore = Infinity;
+    const reachX = this.rx * 1.1;
+    for (let cid = 0; cid < this.prevLanded; cid++) {
+      if (exclude.has(cid) || this.mode[cid] !== MODE_LOOSE) continue;
+      if (Math.abs(this.vy[cid]) > 0.16 * this.dpr) continue;
+      if (this.looseChildOf(cid) >= 0) continue; // Solo apilar sobre la cima de cada pila libre.
+      const dx = Math.abs(x - this.px[cid]);
+      if (dx > reachX) continue;
+      const dy = this.py[cid] - y;
+      // Permite soltar justo encima (dy >= -ry * 1.5) hasta un par de radios más arriba.
+      if (dy < -this.ry * 1.5 || dy > this.rx * 2.5) continue;
+      const score = dx + Math.abs(dy) * 0.45;
+      if (score < bestScore) {
+        bestScore = score;
+        best = cid;
+      }
+    }
+    return best;
   }
 
   private emitClink(extra: boolean, strength: number): void {
@@ -430,6 +507,8 @@ export class CoinsView {
   /** Convierte una moneda en suelta sobre la mesa con velocidad y plano de suelo natural. */
   private releaseToLoose(id: number, vx: number, vy: number, vrot: number, preferredFloorY?: number): void {
     this.mode[id] = MODE_LOOSE;
+    this.parent[id] = -1;
+    this.stackOffX[id] = 0;
     this.vx[id] = vx;
     this.vy[id] = vy;
     this.vrot[id] = vrot;
@@ -439,12 +518,24 @@ export class CoinsView {
     this.floorY[id] = Math.max(this.tableTopY, Math.min(this.tableBotY, base));
   }
 
+  /** Apila una moneda suelta `id` directamente encima de otra moneda suelta `below`. */
+  private attachToLoose(id: number, below: number, vx: number, vy: number): void {
+    const root = this.looseRoot(below);
+    this.mode[id] = MODE_LOOSE;
+    this.parent[id] = below;
+    const rawOff = this.px[id] - this.px[below];
+    const maxOff = this.rx * 0.24;
+    this.stackOffX[id] = Math.max(-maxOff, Math.min(maxOff, rawOff * 0.55));
+    this.floorY[id] = this.floorY[root];
+    this.vx[id] = vx;
+    this.vy[id] = Math.max(0, vy);
+    this.vrot[id] = 0;
+  }
+
   /** Inicia un arrastre: agarra una moneda/bloque si pulsaste sobre ella, o activa barrido para mover/empujar pilas. */
   beginDrag(cssX: number, cssY: number): boolean {
     const px = cssX * this.dpr;
     const py = cssY * this.dpr;
-    this.dragStartX = px;
-    this.dragStartY = py;
     this.dragPtrX = px;
     this.dragPtrY = py;
     this.dragVx = 0;
@@ -453,6 +544,7 @@ export class CoinsView {
     this.dragIds = [];
     this.dragOffX = [];
     this.dragOffY = [];
+    this.snapPreviewId = -1;
 
     const hitId = this.pick(cssX, cssY);
     if (hitId < 0) {
@@ -483,10 +575,21 @@ export class CoinsView {
           this.vrot[cid] += (Math.random() - 0.5) * 0.0008;
         }
       }
+    } else if (this.mode[hitId] === MODE_LOOSE) {
+      // Si es parte de una pila libre creada por el usuario, levantarla igual de natural.
+      const above = this.looseChainAbove(hitId);
+      if (above.length > 0 && above.length <= 5) {
+        picked.push(...above);
+      } else if (above.length > 5) {
+        // Estilo Jenga: reconectar el bloque superior a lo que había debajo de hitId.
+        this.parent[above[0]] = this.parent[hitId];
+      }
     }
 
     for (const cid of picked) {
       this.mode[cid] = MODE_DRAGGED;
+      this.parent[cid] = -1;
+      this.stackOffX[cid] = 0;
       this.vx[cid] = 0;
       this.vy[cid] = 0;
       this.vrot[cid] = 0;
@@ -499,7 +602,7 @@ export class CoinsView {
     return true;
   }
 
-  /** Mueve las monedas agarradas suavemente o empuja pilas al barrer desde fuera. */
+  /** Mueve las monedas agarradas suavemente (mostrando destino de apilado) o empuja pilas al barrer desde fuera. */
   moveDrag(cssX: number, cssY: number, dxCss: number, dyCss: number): void {
     const now = performance.now();
     const dtMove = Math.max(8, Math.min(48, now - this.dragLastMoveAt));
@@ -532,10 +635,9 @@ export class CoinsView {
         const targetRot = Math.max(-0.22, Math.min(0.22, this.dragVx * 0.16));
         this.rot[cid] += (targetRot - this.rot[cid]) * 0.25;
       }
-      // Solo empujar suavemente otras monedas si ya nos alejamos de la pila de origen.
-      if (Math.hypot(ptrX - this.dragStartX, ptrY - this.dragStartY) > this.rx * 1.4) {
-        this.knockAt(ptrX, ptrY, instVx * 0.55, instVy * 0.55, true);
-      }
+      // Detectar si estamos sobre una moneda suelta para apilarla encima al soltar.
+      const baseId = this.dragIds[0];
+      this.snapPreviewId = this.findLooseSnapTarget(this.px[baseId], this.py[baseId], new Set(this.dragIds));
       return;
     }
 
@@ -544,24 +646,47 @@ export class CoinsView {
     }
   }
 
-  /** Suelta las monedas agarradas con peso real de metal (sin salir disparadas). */
+  /** Suelta las monedas agarradas: si hay otra moneda suelta debajo, se apilan limpiamente encima. */
   endDrag(): void {
+    this.snapPreviewId = -1;
     if (this.dragIds.length > 0) {
       const stale = performance.now() - this.dragLastMoveAt > 90;
       const maxV = 0.58 * this.dpr;
       const tvx = stale ? 0 : Math.max(-maxV, Math.min(maxV, this.dragVx * 0.42));
       const tvy = stale ? 0 : Math.max(-maxV * 0.75, Math.min(maxV * 0.75, this.dragVy * 0.32));
-      for (let i = 0; i < this.dragIds.length; i++) {
-        const cid = this.dragIds[i];
-        const spreadVx = tvx + (Math.random() - 0.5) * 0.04 * this.dpr;
-        const spreadVy = tvy;
-        const spin = Math.max(-0.004, Math.min(0.004, spreadVx * 0.003));
+      const calmDrop = Math.hypot(tvx, tvy) < 0.3 * this.dpr;
+      const baseId = this.dragIds[0];
+      const snapTarget = calmDrop ? this.findLooseSnapTarget(this.px[baseId], this.py[baseId], new Set(this.dragIds)) : -1;
+
+      if (snapTarget >= 0) {
+        // Apilar limpiamente sobre la moneda suelta (o torre libre) que hay debajo.
+        this.attachToLoose(baseId, snapTarget, tvx * 0.2, Math.max(0.06 * this.dpr, tvy * 0.3));
+        for (let i = 1; i < this.dragIds.length; i++) {
+          this.attachToLoose(this.dragIds[i], this.dragIds[i - 1], tvx * 0.15, Math.max(0.05 * this.dpr, tvy * 0.25));
+        }
+      } else {
+        // Soltar sobre la mesa: si llevabas un bloque en calma, mantiene su mini-torre intacta.
         const releaseFloor =
-          this.py[cid] >= this.tableTopY
-            ? Math.min(this.tableBotY, this.py[cid] + this.thick * (1.2 + i * 0.5))
+          this.py[baseId] >= this.tableTopY
+            ? Math.min(this.tableBotY, this.py[baseId] + this.thick * 1.2)
             : this.tableTopY + (0.2 + Math.random() * 0.6) * (this.tableBotY - this.tableTopY);
-        this.releaseToLoose(cid, spreadVx, spreadVy, spin, releaseFloor);
+        const spin0 = Math.max(-0.004, Math.min(0.004, tvx * 0.003));
+        this.releaseToLoose(baseId, tvx + (Math.random() - 0.5) * 0.04 * this.dpr, tvy, spin0, releaseFloor);
+
+        const keepMiniStack = this.dragIds.length > 1 && Math.hypot(tvx, tvy) < 0.24 * this.dpr;
+        for (let i = 1; i < this.dragIds.length; i++) {
+          const cid = this.dragIds[i];
+          if (keepMiniStack) {
+            this.attachToLoose(cid, this.dragIds[i - 1], tvx * 0.25, tvy * 0.3);
+          } else {
+            const spreadVx = tvx + (Math.random() - 0.5) * 0.08 * this.dpr;
+            const spin = Math.max(-0.004, Math.min(0.004, spreadVx * 0.003));
+            const floorI = Math.min(this.tableBotY, releaseFloor + this.thick * i * 0.5);
+            this.releaseToLoose(cid, spreadVx, tvy, spin, floorI);
+          }
+        }
       }
+
       this.dragIds = [];
       this.dragOffX = [];
       this.dragOffY = [];
@@ -595,7 +720,6 @@ export class CoinsView {
       touched = true;
 
       if (m === MODE_STACKED) {
-        // Mezclar hacia la velocidad del cursor en vez de sumar sin límite (evita disparos).
         this.vx[id] += (targetVx - this.vx[id]) * blend;
         this.vrot[id] += (targetVx * 0.0012 - this.vrot[id]) * 0.25;
         const offset = Math.abs(this.px[id] + this.vx[id] * 16 - this.homeX(id));
@@ -606,7 +730,6 @@ export class CoinsView {
             Math.min(0, targetVy * 0.4 - 0.05 * this.dpr),
             targetVx * 0.0025,
           );
-          // Desplazar ligeramente las monedas justo encima para que caigan con peso, no disparadas.
           const g = this.geom[id];
           const st = this.stacks[g.stackIdx];
           for (let r = g.row + 1; r < st.ids.length; r++) {
@@ -626,10 +749,21 @@ export class CoinsView {
           }
         }
       } else if (m === MODE_LOOSE) {
-        // Empujar monedas ya sueltas con deslizamiento pesado sobre la mesa.
         this.vx[id] += (targetVx * 0.85 - this.vx[id]) * blend;
         this.vrot[id] += (targetVx * 0.0015 - this.vrot[id]) * 0.25;
-        this.floorY[id] = Math.max(this.tableTopY, Math.min(this.tableBotY, this.floorY[id] + ptrVy * 10 * factor));
+        if (this.parent[id] >= 0) {
+          // Si golpeas una moneda de una torre libre, se desprende al desplazarse o con barrido rápido.
+          const p = this.parent[id];
+          if (fastSwipe || Math.abs(this.px[id] + this.vx[id] * 16 - this.px[p]) > this.rx * 0.48) {
+            const above = this.looseChainAbove(id);
+            this.releaseToLoose(id, this.vx[id] * 0.85, -0.04 * this.dpr, targetVx * 0.0025, this.floorY[id]);
+            for (const aid of above) {
+              this.releaseToLoose(aid, this.vx[id] * 0.65 + (Math.random() - 0.5) * 0.08 * this.dpr, -0.02 * this.dpr, (Math.random() - 0.5) * 0.003, this.floorY[id]);
+            }
+          }
+        } else {
+          this.floorY[id] = Math.max(this.tableTopY, Math.min(this.tableBotY, this.floorY[id] + ptrVy * 10 * factor));
+        }
       }
       this.emitClink(this.geom[id].extra, Math.min(0.8, speed / (1.2 * this.dpr)));
     }
@@ -641,8 +775,11 @@ export class CoinsView {
   tidy(): void {
     this.dragIds = [];
     this.swiping = false;
+    this.snapPreviewId = -1;
     let maxDelay = 0;
     for (let id = 0; id < this.prevLanded; id++) {
+      this.parent[id] = -1;
+      this.stackOffX[id] = 0;
       const m = this.mode[id];
       const crooked = m === MODE_STACKED && Math.abs(this.px[id] - this.homeX(id)) > this.rx * 0.08;
       if (m !== MODE_STACKED || crooked) {
@@ -790,68 +927,15 @@ export class CoinsView {
       }
     }
 
-    // 2. Monedas SUELTAS (MODE_LOOSE) y EN RETORNO (MODE_RETURNING).
+    // 2. Monedas SUELTAS (MODE_LOOSE) procesadas de abajo arriba (raíces primero, luego apiladas) y EN RETORNO.
+    const looseIds: number[] = [];
     for (let id = 0; id < landed; id++) {
       const m = this.mode[id];
       if (m === MODE_DRAGGED) {
         anyMessy = true;
-        continue;
-      }
-      if (m === MODE_LOOSE) {
+      } else if (m === MODE_LOOSE) {
         anyMessy = true;
-        const fy = this.floorY[id];
-        const onFloor = this.py[id] >= fy - 0.5 && Math.abs(this.vy[id]) < 0.04 * this.dpr;
-        if (!onFloor) {
-          this.vy[id] += g * dt;
-          this.py[id] += this.vy[id] * dt;
-          if (this.py[id] >= fy) {
-            const impact = this.vy[id];
-            this.py[id] = fy;
-            if (impact > 0.16 * this.dpr) {
-              this.vy[id] = -impact * 0.22;
-              this.vx[id] *= 0.78;
-              this.vx[id] += (Math.random() - 0.5) * impact * 0.05;
-              this.vrot[id] = (Math.random() - 0.5) * 0.003;
-              this.emitClink(this.geom[id].extra, Math.min(1, impact / (0.85 * this.dpr)));
-            } else {
-              this.vy[id] = 0;
-            }
-          }
-        } else {
-          this.py[id] = fy;
-          this.vy[id] = 0;
-          this.vx[id] *= tableFriction;
-          if (Math.abs(this.vx[id]) < 0.005) this.vx[id] = 0;
-        }
-
-        this.px[id] += this.vx[id] * dt;
-        // Rebotes en los bordes izquierdo y derecho del lienzo.
-        if (this.px[id] < marginX) {
-          this.px[id] = marginX;
-          this.vx[id] = Math.abs(this.vx[id]) * 0.45;
-          if (Math.abs(this.vx[id]) > 0.15 * this.dpr) this.emitClink(this.geom[id].extra, 0.35);
-        } else if (this.px[id] > W - marginX) {
-          this.px[id] = W - marginX;
-          this.vx[id] = -Math.abs(this.vx[id]) * 0.45;
-          if (Math.abs(this.vx[id]) > 0.15 * this.dpr) this.emitClink(this.geom[id].extra, 0.35);
-        }
-        if (this.py[id] < this.topLimitY) {
-          this.py[id] = this.topLimitY;
-          this.vy[id] = Math.abs(this.vy[id]) * 0.3;
-        }
-
-        // Al caer o deslizarse, la moneda gira; al posarse en la mesa, queda plana.
-        if (onFloor) {
-          this.rot[id] *= Math.pow(0.72, dt / 16);
-          this.vrot[id] *= Math.pow(0.72, dt / 16);
-          if (Math.abs(this.rot[id]) < 0.002) {
-            this.rot[id] = 0;
-            this.vrot[id] = 0;
-          }
-        } else {
-          this.vrot[id] *= Math.pow(0.95, dt / 16);
-          this.rot[id] = Math.max(-0.55, Math.min(0.55, this.rot[id] + this.vrot[id] * dt));
-        }
+        looseIds.push(id);
       } else if (m === MODE_RETURNING) {
         anyReturning = true;
         if (this.returnDelay[id] > 0) {
@@ -873,6 +957,121 @@ export class CoinsView {
           this.vrot[id] = 0;
           this.mode[id] = MODE_STACKED;
         }
+      }
+    }
+
+    // Ordenar las sueltas por profundidad en su torre libre (0 = mesa, 1 = sobre otra, ...).
+    if (looseIds.length > 1) {
+      looseIds.sort((a, b) => this.looseDepth(a) - this.looseDepth(b));
+    }
+
+    for (let idx = 0; idx < looseIds.length; idx++) {
+      const id = looseIds[idx];
+      let p = this.parent[id];
+      if (p >= 0 && this.mode[p] !== MODE_LOOSE) {
+        this.parent[id] = -1;
+        this.stackOffX[id] = 0;
+        p = -1;
+      }
+
+      if (p >= 0) {
+        // Moneda suelta apilada sobre otra moneda suelta `p` (torre creada por el usuario).
+        const root = this.looseRoot(p);
+        this.floorY[id] = this.floorY[root];
+        const restX = this.px[p] + this.stackOffX[id];
+        const restY = this.py[p] - this.thick;
+
+        if (this.py[id] < restY - 0.5 || this.vy[id] !== 0) {
+          this.vy[id] += g * dt;
+          this.py[id] += this.vy[id] * dt;
+          if (this.py[id] >= restY) {
+            const impact = this.vy[id];
+            this.py[id] = restY;
+            if (impact > 0.16 * this.dpr) {
+              this.vy[id] = -impact * 0.2;
+              this.emitClink(this.geom[id].extra, Math.min(0.85, impact / (0.85 * this.dpr)));
+            } else {
+              this.vy[id] = 0;
+            }
+          }
+        } else {
+          this.py[id] = restY;
+        }
+
+        // Acompañar suavemente a la moneda inferior y amortiguar cualquier golpe horizontal.
+        const followK = this.py[id] < restY - this.thick ? 0.22 : 0.45;
+        this.px[id] += (restX - this.px[id]) * followK + this.vx[id] * dt;
+        this.vx[id] *= stackFriction;
+        if (Math.abs(this.vx[id]) < 0.004) this.vx[id] = 0;
+
+        // Si se desplaza demasiado respecto a `p`, pierde el equilibrio y cae a la mesa.
+        const overhang = this.px[id] - this.px[p];
+        if (Math.abs(overhang) > this.rx * 0.56 && this.py[id] >= restY - this.thick) {
+          const tipVx = Math.max(-0.24 * this.dpr, Math.min(0.24 * this.dpr, this.vx[id])) + Math.sign(overhang) * 0.09 * this.dpr;
+          this.releaseToLoose(id, tipVx, 0, Math.sign(overhang) * 0.0025, this.floorY[root]);
+          continue;
+        }
+
+        this.rot[id] *= Math.pow(0.72, dt / 16);
+        this.vrot[id] *= Math.pow(0.72, dt / 16);
+        if (Math.abs(this.rot[id]) < 0.002) {
+          this.rot[id] = 0;
+          this.vrot[id] = 0;
+        }
+        continue;
+      }
+
+      // Moneda suelta apoyada directamente en la mesa (raíz).
+      const fy = this.floorY[id];
+      const onFloor = this.py[id] >= fy - 0.5 && Math.abs(this.vy[id]) < 0.04 * this.dpr;
+      if (!onFloor) {
+        this.vy[id] += g * dt;
+        this.py[id] += this.vy[id] * dt;
+        if (this.py[id] >= fy) {
+          const impact = this.vy[id];
+          this.py[id] = fy;
+          if (impact > 0.16 * this.dpr) {
+            this.vy[id] = -impact * 0.22;
+            this.vx[id] *= 0.78;
+            this.vx[id] += (Math.random() - 0.5) * impact * 0.05;
+            this.vrot[id] = (Math.random() - 0.5) * 0.003;
+            this.emitClink(this.geom[id].extra, Math.min(1, impact / (0.85 * this.dpr)));
+          } else {
+            this.vy[id] = 0;
+          }
+        }
+      } else {
+        this.py[id] = fy;
+        this.vy[id] = 0;
+        this.vx[id] *= tableFriction;
+        if (Math.abs(this.vx[id]) < 0.005) this.vx[id] = 0;
+      }
+
+      this.px[id] += this.vx[id] * dt;
+      if (this.px[id] < marginX) {
+        this.px[id] = marginX;
+        this.vx[id] = Math.abs(this.vx[id]) * 0.45;
+        if (Math.abs(this.vx[id]) > 0.15 * this.dpr) this.emitClink(this.geom[id].extra, 0.35);
+      } else if (this.px[id] > W - marginX) {
+        this.px[id] = W - marginX;
+        this.vx[id] = -Math.abs(this.vx[id]) * 0.45;
+        if (Math.abs(this.vx[id]) > 0.15 * this.dpr) this.emitClink(this.geom[id].extra, 0.35);
+      }
+      if (this.py[id] < this.topLimitY) {
+        this.py[id] = this.topLimitY;
+        this.vy[id] = Math.abs(this.vy[id]) * 0.3;
+      }
+
+      if (onFloor) {
+        this.rot[id] *= Math.pow(0.72, dt / 16);
+        this.vrot[id] *= Math.pow(0.72, dt / 16);
+        if (Math.abs(this.rot[id]) < 0.002) {
+          this.rot[id] = 0;
+          this.vrot[id] = 0;
+        }
+      } else {
+        this.vrot[id] *= Math.pow(0.95, dt / 16);
+        this.rot[id] = Math.max(-0.55, Math.min(0.55, this.rot[id] + this.vrot[id] * dt));
       }
     }
 
@@ -1066,14 +1265,16 @@ export class CoinsView {
       this.drawShadow(ctx, st.bx, st.by + ry * 0.35, rx * 1.3, ry * 1.5, 0.64);
     }
 
-    // Sombras de contacto para monedas sueltas o arrastradas (se encogen y suavizan con la altura).
+    // Sombras de contacto para monedas sueltas raíz o arrastradas (se encogen y suavizan con la altura).
     for (let id = 0; id < f.landed; id++) {
       const m = this.mode[id];
       if (m !== MODE_LOOSE && m !== MODE_DRAGGED) continue;
+      if (m === MODE_LOOSE && this.parent[id] >= 0) continue; // La sombra la dibuja la moneda base de la torre libre.
       const fy = m === MODE_DRAGGED ? Math.max(this.tableTopY, Math.min(this.tableBotY, this.py[id] + ry * 2.5)) : this.floorY[id];
       const height = Math.max(0, fy - this.py[id]);
       const hScale = Math.max(0.55, 1 - height / (rx * 6));
-      const alpha = Math.max(0.16, 0.55 * hScale);
+      const baseAlpha = m === MODE_LOOSE && this.looseChildOf(id) >= 0 ? 0.62 : 0.55;
+      const alpha = Math.max(0.16, baseAlpha * hScale);
       this.drawShadow(ctx, this.px[id], fy + thick + ry * 0.25, rx * (1.16 * (2 - hScale * 0.85)), ry * 1.25, alpha);
     }
 
@@ -1135,6 +1336,16 @@ export class CoinsView {
         ctx.beginPath();
         ctx.ellipse(cx, topY, rx + 1.5 * this.dpr, ry + 1 * this.dpr, rot, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (id === this.snapPreviewId) {
+        // Destello dorado sutil para indicar que al soltar se apilará sobre esta moneda.
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = this.isLight ? '#b57410' : '#ffe88a';
+        ctx.lineWidth = Math.max(1.8, 2.2 * this.dpr);
+        ctx.setLineDash([4 * this.dpr, 3 * this.dpr]);
+        ctx.beginPath();
+        ctx.ellipse(cx, topY - thick * 0.4, rx * 1.04, ry * 1.06, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
 
       if (milestoneSet.has(id) && !cut) {

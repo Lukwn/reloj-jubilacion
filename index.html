@@ -125,6 +125,7 @@
       </label>
       <p id="edad-texto" class="edad-texto"></p>
       <div class="acciones">
+        <button id="btn-edad-calendario" type="button" class="secundario" title="Descargar evento para Google Calendar, Apple Calendar u Outlook">Añadir al calendario</button>
         <button id="btn-edad-usar" type="button" class="primario">Usar esta edad</button>
       </div>
     </section>
@@ -136,6 +137,7 @@
       <p id="compartir-estado" class="nota" role="status"></p>
       <div class="acciones">
         <button id="btn-compartir-cerrar" type="button" class="secundario">Cerrar</button>
+        <button id="btn-compartir-calendario" type="button" class="secundario" title="Añadir tu fecha de jubilación al calendario">Calendario (.ics)</button>
         <button id="btn-compartir-copiar" type="button" class="secundario">Copiar texto</button>
         <a id="btn-compartir-descargar" class="boton secundario" download="mi-reloj-de-jubilacion.png">Descargar</a>
         <button id="btn-compartir-sistema" type="button" class="primario">Compartir…</button>
@@ -168,10 +170,16 @@
         <fieldset>
           <legend>Festivos</legend>
           <p class="nota">Sirven para saber qué días se trabaja (segundos) y cuándo se cobra (nóminas). Los nacionales, incluido Viernes Santo, ya se tienen en cuenta; en los días, los festivos y fines de semana se ven más claros.</p>
+          <label>Comunidad autónoma
+            <select name="region">
+              <option value="">Personalizado (solo festivos nacionales)</option>
+            </select>
+          </label>
+          <p id="nota-comunidad" class="nota" hidden></p>
           <label class="check"><input type="checkbox" name="holyThursday" checked /> Jueves Santo</label>
           <label class="check"><input type="checkbox" name="easterMonday" /> Lunes de Pascua</label>
-          <label>Festivos autonómicos y locales
-            <input type="text" name="extraHolidays" placeholder="24/06, 15/05, 09/11/2027" autocomplete="off" />
+          <label>Festivos locales y adicionales
+            <input type="text" name="extraHolidays" placeholder="15/05, 24/09, 09/11/2027" autocomplete="off" />
           </label>
           <p class="nota">DD/MM se repite cada año; DD/MM/AAAA es solo de ese año.</p>
         </fieldset>
