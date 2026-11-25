@@ -72,6 +72,7 @@ const tooltipYear = $('tooltip-anio');
 const tooltipWhen = $('tooltip-cuando');
 const lensLabel = $('etiqueta-lupa');
 const layersBtn = $<HTMLButtonElement>('btn-capas');
+const customBtn = $<HTMLButtonElement>('btn-personalizar');
 const sortBtn = $<HTMLButtonElement>('btn-ordenar');
 const playBtn = $<HTMLButtonElement>('btn-play');
 const playPanel = $('panel-play');
@@ -170,6 +171,22 @@ let hoverYear = -1;
 
 // ---------------------------------------------------------------- mundo
 
+/** Configuración de ejemplo para la primera visita (el reloj arranca vivo en vez de bloquear con el formulario). */
+const DEMO_CONFIG: LifeConfig = {
+  birthDate: '1992-05-15',
+  retirementAge: 67,
+  workStartDate: '2016-09-01',
+  holyThursday: true,
+  easterMonday: false,
+  extraHolidays: '',
+  pagas: 14,
+  jornadaInicio: '09:00',
+  jornadaFin: '18:00',
+  comidaInicio: '14:00',
+  comidaFin: '15:00',
+};
+let isDemoConfig = false;
+
 /** Unidad de tiempo de los granos. */
 let unit: UnitId = loadUnit();
 
@@ -198,9 +215,10 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
   const live = unit === 'segundos';
   const prog = live ? null : loadProgress(unit);
   const sameLife = prog && prog.startDay === life.startDay && (prog.key ? prog.key === key : prog.total === grains.total);
-  // Primera visita (o vida laboral nueva): el reloj empieza lleno arriba y los granos ya
-  // vividos caen delante de ti. Si vuelves tras unos días, caen solo los pendientes.
-  const shown = shownOverride ?? (live ? target : sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
+  // En modo ejemplo (primera visita) el reloj arranca ya poblado para mostrar el efecto al instante.
+  const demoShown = live ? target : Math.max(0, target - (unit === 'dias' ? 18 : 0));
+  const shown =
+    shownOverride ?? (isDemoConfig ? demoShown : live ? target : sameLife ? Math.max(0, Math.min(prog.landed, target)) : 0);
 
   const sandColors = grainColors(grains, life.startDay, life.isWorkday);
   const layers = yearLayers(grains, life.startDay);
@@ -292,8 +310,8 @@ function createWorld(cfg: LifeConfig, shownOverride?: number): void {
 }
 
 function persistProgress(w: World): void {
-  // Lo que pasa durante una reproducción no es real, y los segundos son solo de hoy: no se guarda.
-  if (play || w.unit === 'segundos') return;
+  // Ni la reproducción, ni el ejemplo de primera visita ni los segundos de hoy se guardan.
+  if (play || isDemoConfig || w.unit === 'segundos') return;
   saveProgress({ startDay: w.life.startDay, total: w.grains.total, landed: w.landed, key: w.key }, w.unit);
   saveMilestonesSeen({ key: w.key, upTo: w.seenUpTo }, w.unit);
 }
@@ -1219,7 +1237,7 @@ regionSelect.addEventListener('change', () => {
 });
 
 function openSettings(): void {
-  const cfg = world?.cfg ?? loadConfig();
+  const cfg = isDemoConfig ? null : (world?.cfg ?? loadConfig());
   const f = form.elements as unknown as Record<string, HTMLInputElement>;
   f.birthDate.value = cfg?.birthDate ?? '';
   f.retirementAge.value = String(cfg?.retirementAge ?? 67);
@@ -1240,6 +1258,7 @@ function openSettings(): void {
 }
 
 $('btn-ajustes').addEventListener('click', openSettings);
+customBtn.addEventListener('click', openSettings);
 
 // El menú de páginas se cierra al tocar fuera o con Escape.
 const menu = $('menu') as HTMLDetailsElement;
@@ -1277,6 +1296,8 @@ form.addEventListener('submit', (e) => {
     formError.textContent = error;
     return;
   }
+  isDemoConfig = false;
+  customBtn.hidden = true;
   saveConfig(cfg);
   createWorld(cfg);
   dialog.close();
@@ -1977,8 +1998,15 @@ showHint(unitHint(unit), 9000);
 updateUnitUi();
 
 const initial = loadConfig();
-if (initial && !validateConfig(initial) && typeof jornadaFor(initial) !== 'string') createWorld(initial);
-else openSettings();
+if (initial && !validateConfig(initial) && typeof jornadaFor(initial) !== 'string') {
+  isDemoConfig = false;
+  customBtn.hidden = true;
+  createWorld(initial);
+} else {
+  isDemoConfig = true;
+  customBtn.hidden = false;
+  createWorld(DEMO_CONFIG);
+}
 scheduleMidnight();
 requestAnimationFrame(frame);
 

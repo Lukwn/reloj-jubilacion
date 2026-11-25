@@ -596,9 +596,42 @@ dialog label.check input { display: inline; width: auto; margin: 0; accent-color
 .fps {
   position: fixed;
   left: 12px;
-  bottom: 12px;
+  bottom: 40px;
   font: 12px ui-monospace, monospace;
   color: var(--muted);
+}
+
+/* Enlaces discretos a guías e información legal en esquinas inferiores (solo escritorio ancho). */
+.pie-enlaces {
+  position: fixed;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.pie-enlaces.izq { left: 18px; }
+.pie-enlaces.der { right: 18px; }
+.pie-enlaces a {
+  color: var(--muted);
+  text-decoration: none;
+  opacity: 0.62;
+  transition: opacity 140ms ease, color 140ms ease;
+}
+.pie-enlaces a:hover,
+.pie-enlaces a:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  outline: none;
+}
+.pie-enlaces a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 960px) {
+  .pie-enlaces { display: none; }
 }
 
 @media (max-width: 480px) {
