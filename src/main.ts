@@ -809,11 +809,20 @@ function hideLens(): void {
 }
 
 let hintTimer = 0;
+let userInteracted = false;
+
+function dismissHint(): void {
+  clearTimeout(hintTimer);
+  hintEl.hidden = true;
+  countdownEl.hidden = false;
+}
+
 function showHint(text: string, ms = 7000): void {
   hintEl.textContent = text;
-  hintEl.classList.remove('oculta');
+  hintEl.hidden = false;
+  countdownEl.hidden = true;
   clearTimeout(hintTimer);
-  hintTimer = window.setTimeout(() => hintEl.classList.add('oculta'), ms);
+  hintTimer = window.setTimeout(dismissHint, ms);
 }
 
 function updateSortButton(): void {
@@ -854,7 +863,10 @@ function setLayers(on: boolean): void {
 }
 
 layersBtn.setAttribute('aria-pressed', String(layersOn));
-layersBtn.addEventListener('click', () => setLayers(!layersOn));
+layersBtn.addEventListener('click', () => {
+  setLayers(!layersOn);
+  menu.open = false;
+});
 sortBtn.hidden = !layersOn;
 
 /** Reordena los granos por fecha o vuelve a apilar las monedas desordenadas. */
@@ -916,7 +928,8 @@ function digAlong(w: World, a: Point, b: Point, r: number): void {
 
 canvas.addEventListener('pointerdown', (e) => {
   askMotionPermission();
-  hintEl.classList.add('oculta');
+  userInteracted = true;
+  dismissHint();
   const w = world;
   if (!w || (e.pointerType === 'mouse' && e.button !== 0)) return;
   press = {
@@ -1129,20 +1142,36 @@ canvas.addEventListener('pointerleave', () => {
 
 // ---------------------------------------------------------------- contador
 
+let lastCounterKey = '';
 function updateCounter(): void {
   const w = world;
   if (!w) {
-    counterEl.textContent = '';
+    counterEl.replaceChildren();
+    lastCounterKey = '';
     return;
   }
   const { remaining, done, fraction } = remainingNow(w);
   const pct = formatPercent(fraction);
-  // Lo que queda y lo que ya llevas, en la unidad del reloj.
-  const text =
+  const primaryText =
     remaining <= 0
-      ? `¡Jubilación! · llevas ${formatInt(done)} · ${pct}`
-      : `${remaining === 1 ? 'Queda' : 'Quedan'} ${unitPlural(remaining, w.unit)} · llevas ${formatInt(done)} · ${pct}`;
-  if (counterEl.textContent !== text) counterEl.textContent = text;
+      ? '¡Jubilación!'
+      : `${remaining === 1 ? 'Queda' : 'Quedan'} ${unitPlural(remaining, w.unit)}`;
+  const secondaryText = `· llevas ${formatInt(done)} · ${pct}`;
+  const key = `${primaryText}|${secondaryText}`;
+  if (key === lastCounterKey) return;
+  lastCounterKey = key;
+
+  let mainSpan = counterEl.querySelector<HTMLSpanElement>('.cifra-principal');
+  let secSpan = counterEl.querySelector<HTMLSpanElement>('.cifra-sec');
+  if (!mainSpan || !secSpan) {
+    mainSpan = document.createElement('span');
+    mainSpan.className = 'cifra-principal';
+    secSpan = document.createElement('span');
+    secSpan.className = 'cifra-sec';
+    counterEl.replaceChildren(mainSpan, secSpan);
+  }
+  if (mainSpan.textContent !== primaryText) mainSpan.textContent = primaryText;
+  if (secSpan.textContent !== secondaryText) secSpan.textContent = secondaryText;
 }
 
 /**
@@ -1334,11 +1363,17 @@ function updateCountdown(): void {
 const sound = new SandSound();
 let soundOn = loadSound();
 sound.enabled = soundOn;
-soundBtn.setAttribute('aria-pressed', String(soundOn));
+function syncSoundBtn(): void {
+  soundBtn.setAttribute('aria-pressed', String(soundOn));
+  const label = soundOn ? 'Silenciar sonido' : 'Activar sonido';
+  soundBtn.setAttribute('aria-label', label);
+  soundBtn.dataset.tooltip = label;
+}
+syncSoundBtn();
 soundBtn.addEventListener('click', () => {
   soundOn = !soundOn;
   saveSound(soundOn);
-  soundBtn.setAttribute('aria-pressed', String(soundOn));
+  syncSoundBtn();
   sound.setEnabled(soundOn);
   if (soundOn) window.setTimeout(() => sound.tink(0.6), 60);
 });
@@ -1527,7 +1562,10 @@ function openShare(): void {
   });
 }
 
-shareBtn.addEventListener('click', openShare);
+shareBtn.addEventListener('click', () => {
+  menu.open = false;
+  openShare();
+});
 shareSystem.addEventListener('click', () => {
   if (!shareFile) return;
   navigator.share({ files: [shareFile], text: shareMessage }).catch(() => undefined);
@@ -1867,21 +1905,16 @@ document.addEventListener('visibilitychange', () => {
 window.setInterval(checkDay, 60_000);
 window.setInterval(updateCountdown, 1000);
 window.addEventListener('pagehide', () => world && persistProgress(world));
-if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
-  hintEl.textContent = `Cada grano es ${UNIT_NAMES[unit].grain} · pasa el ratón por la arena para verla con lupa · arrastra para inclinar el reloj · doble clic para darle la vuelta`;
-}
-window.setTimeout(() => hintEl.classList.add('oculta'), 10_000);
-
-// ---------------------------------------------------------------- unidad de tiempo
-
 const unitBox = $('unidades');
 const unitButtons = [...unitBox.querySelectorAll<HTMLButtonElement>('[data-unidad]')];
 
 const unitHint = (u: UnitId) => {
-  if (u === 'segundos') return 'Cada gota es un segundo de tu vida laboral · arrastra para inclinar el reloj · toca un nivel para ver su fecha';
-  if (u === 'nominas') return 'Cada moneda es una nómina · arrastra para moverlas o apilarlas entre sí · doble clic para ordenar';
-  if (u === 'anios') return 'Cada anillo del árbol es un año de tu vida laboral · toca uno para ver su frase';
-  return `Cada grano es ${UNIT_NAMES[u].grain} · toca uno para verlo · arrastra o agita para remover la arena`;
+  if (u === 'segundos') return 'Cada gota es un segundo · arrastra para inclinar el reloj';
+  if (u === 'nominas') return 'Cada moneda es una nómina · arrastra para moverlas o apilarlas';
+  if (u === 'anios') return 'Cada anillo es un año · toca uno para ver su fecha';
+  return matchMedia('(hover: hover) and (pointer: fine)').matches
+    ? 'Cada grano es un día · pasa el ratón para ver con lupa · arrastra para inclinar'
+    : 'Cada grano es un día · toca para verlo · arrastra o agita para remover';
 };
 
 /** Pone los botones y textos de acuerdo con la unidad elegida. */
@@ -1893,9 +1926,16 @@ function updateUnitUi(): void {
   }
   if (!play) playBtn.hidden = false;
   ageBtn.setAttribute('aria-disabled', 'false');
-  ageBtn.title = '¿Y si me jubilo a otra edad?';
-  layersBtn.title = 'Capas por años';
+  ageBtn.setAttribute('aria-label', 'Probar otra edad de jubilación');
   layersBtn.setAttribute('aria-label', 'Capas por años');
+}
+
+function fadeCanvasTransition(): void {
+  if (reducedMotion) return;
+  canvas.classList.add('cambiando');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => canvas.classList.remove('cambiando'));
+  });
 }
 
 function setUnit(u: UnitId): void {
@@ -1905,6 +1945,7 @@ function setUnit(u: UnitId): void {
   closeAgePanel();
   hideTooltip();
   hideLens();
+  fadeCanvasTransition();
   // Al salir de la reproducción ya se crea el reloj real con la unidad nueva.
   if (play) exitPlay();
   else {
@@ -1912,7 +1953,8 @@ function setUnit(u: UnitId): void {
     if (cfg && !validateConfig(cfg)) createWorld(cfg);
   }
   updateUnitUi();
-  showHint(unitHint(u));
+  if (!userInteracted) showHint(unitHint(u));
+  else dismissHint();
 }
 
 for (const b of unitButtons) {
@@ -1931,7 +1973,7 @@ unitBox.addEventListener('keydown', (e) => {
   unitButtons.find((b) => b.dataset.unidad === next)?.focus();
 });
 
-hintEl.textContent = unitHint(unit);
+showHint(unitHint(unit), 9000);
 updateUnitUi();
 
 const initial = loadConfig();

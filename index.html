@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#080b12" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#eef2f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0c0e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f1f0ec" media="(prefers-color-scheme: light)" />
     <title>Reloj de jubilación: cuántos días te quedan para jubilarte</title>
     <meta name="description" content="Un reloj de arena en el que cada grano es un día de tu vida laboral: arriba los que te quedan hasta la jubilación, abajo los que ya pasaron. Cada noche cae uno." />
     <meta property="og:type" content="website" />
@@ -25,38 +25,42 @@
       <h1>Reloj de jubilación</h1>
       <button id="btn-ordenar" class="chip" type="button" hidden>Ordenar capas</button>
       <div class="botones">
-      <button id="btn-capas" class="icono" type="button" aria-pressed="false" aria-label="Capas por años" title="Capas por años">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path fill="currentColor" d="M12 3 2 8l10 5 10-5-10-5Zm-7.6 8.6L2 12.8l10 5 10-5-2.4-1.2L12 15.4l-7.6-3.8Zm0 4.4L2 17.2l10 5 10-5-2.4-1.2L12 19.8 4.4 16Z"/>
-        </svg>
-      </button>
-      <button id="btn-sonido" class="icono" type="button" aria-pressed="false" aria-label="Sonido" title="Sonido">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <button id="btn-sonido" class="icono" type="button" aria-pressed="false" aria-label="Activar sonido" data-tooltip="Sonido">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>
           <path class="ondas" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>
           <path class="mute" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m15.5 9.5 5 5m0-5-5 5"/>
         </svg>
       </button>
-      <button id="btn-compartir" class="icono" type="button" aria-label="Compartir mi reloj" title="Compartir mi reloj">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15V4m0 0L8 8m4-4 4 4M6 12v6.5A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5V12"/>
-        </svg>
-      </button>
-      <details id="menu" class="menu">
-        <summary class="icono" aria-label="Más información" title="Más información">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path fill="currentColor" d="M4 6.5h16v2H4zm0 4.5h16v2H4zm0 4.5h16v2H4z"/>
-          </svg>
-        </summary>
-        <nav aria-label="Páginas">
-        %MENU_PAGINAS%
-        </nav>
-      </details>
-      <button id="btn-ajustes" class="icono" type="button" aria-label="Ajustes" title="Ajustes">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <button id="btn-ajustes" class="icono" type="button" aria-label="Ajustes del reloj" data-tooltip="Ajustes">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z" transform="translate(-1 0)"/>
         </svg>
       </button>
+      <details id="menu" class="menu">
+        <summary class="icono" aria-label="Menú y opciones" data-tooltip="Menú">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M4 6.5h16v1.8H4zm0 4.6h16v1.8H4zm0 4.6h16v1.8H4z"/>
+          </svg>
+        </summary>
+        <nav aria-label="Opciones y páginas">
+          <button id="btn-capas" class="menu-accion" type="button" aria-pressed="false" aria-label="Capas por años">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M12 3 2 8l10 5 10-5-10-5Zm-7.6 8.6L2 12.8l10 5 10-5-2.4-1.2L12 15.4l-7.6-3.8Zm0 4.4L2 17.2l10 5 10-5-2.4-1.2L12 19.8 4.4 16Z"/>
+            </svg>
+            <span>Capas por años</span>
+            <span class="menu-estado" aria-hidden="true"></span>
+          </button>
+          <button id="btn-compartir" class="menu-accion" type="button" aria-label="Compartir mi reloj">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15V4m0 0L8 8m4-4 4 4M6 12v6.5A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5V12"/>
+            </svg>
+            <span>Compartir mi reloj</span>
+          </button>
+          <hr class="menu-sep" />
+        %MENU_PAGINAS%
+        </nav>
+      </details>
       </div>
     </header>
 
@@ -73,21 +77,21 @@
         <button type="button" role="radio" data-unidad="anios" aria-checked="false" tabindex="-1">Años</button>
       </div>
       <div class="fila-contador">
-      <button id="btn-play" class="play-btn" type="button" aria-label="Reproducir el paso del tiempo" title="Reproducir el paso del tiempo">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/></svg>
+      <button id="btn-play" class="play-btn" type="button" aria-label="Reproducir el paso del tiempo" data-tooltip="Reproducir">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10.5-6.5z"/></svg>
       </button>
-      <button id="btn-edad" class="contador-btn" type="button" title="¿Y si me jubilo a otra edad?" aria-controls="panel-edad" aria-expanded="false">
+      <button id="btn-edad" class="contador-btn" type="button" aria-label="Probar otra edad de jubilación" aria-controls="panel-edad" aria-expanded="false">
         <span id="contador" aria-live="polite"></span>
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 8h9m4 0h3M4 16h3m4 0h9"/>
-          <circle cx="15" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
-          <circle cx="9" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M4 8h9m4 0h3M4 16h3m4 0h9"/>
+          <circle cx="15" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="9" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
         </svg>
       </button>
       </div>
       <div class="linea2">
-        <p id="pista" class="pista">Cada grano es un día de tu vida laboral · toca uno para ver su día · arrastra o agita para remover la arena</p>
-        <p id="cuenta" class="cuenta"></p>
+        <p id="pista" class="pista">Cada grano es un día de tu vida laboral · arrastra para inclinar el reloj</p>
+        <p id="cuenta" class="cuenta" hidden></p>
       </div>
     </footer>
 

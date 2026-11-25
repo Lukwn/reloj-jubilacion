@@ -1,5 +1,6 @@
 import { LAYER_TONES } from './colors';
 import { civilFromDay, type Life } from './dates';
+import { agedBrassGradient, drawStudioShadow, drawStudioSurface, gunmetalGradient, studioPalette } from './studio';
 
 export interface ClepsydraFrame {
   time: number;
@@ -81,6 +82,7 @@ export class ClepsydraView {
   private cx = 0;
   private topY = 0;
   private waistRingY = 0;
+  private lowerRingY = 0;
   private nozzleY = 0;
   private lowerTopY = 0;
   private botY = 0;
@@ -181,8 +183,9 @@ export class ClepsydraView {
     this.topY = y0;
     this.nozzleY = y0 + totalH * 0.445;
     this.waistRingY = y0 + totalH * 0.148;
-    this.lowerTopY = y0 + totalH * 0.632;
+    this.lowerTopY = y0 + totalH * 0.61;
     this.botY = y0 + totalH;
+    this.lowerRingY = this.lowerTopY + (this.botY - this.lowerTopY) * 0.24;
     this.tipInitialized = false;
   }
 
@@ -1024,44 +1027,51 @@ export class ClepsydraView {
 
     const liqGrad = ctx.createLinearGradient(this.cx, surfY, this.cx, bottomY);
     if (isUpper) {
-      // Gradiente único sin corte desde la superficie hasta el extremo colgante del agua.
+      // Agua cristalina transparente: deja ver el estudio oscuro a través del cuerpo y brilla por refracción.
       if (this.isLight) {
-        liqGrad.addColorStop(0, 'rgba(98, 202, 228, 0.74)');
-        liqGrad.addColorStop(0.42, 'rgba(38, 146, 188, 0.86)');
-        liqGrad.addColorStop(0.78, 'rgba(54, 174, 212, 0.91)');
-        liqGrad.addColorStop(1, 'rgba(38, 148, 192, 0.94)');
+        liqGrad.addColorStop(0, 'rgba(182, 198, 206, 0.16)');
+        liqGrad.addColorStop(0.45, 'rgba(148, 168, 178, 0.22)');
+        liqGrad.addColorStop(0.82, 'rgba(128, 150, 162, 0.3)');
+        liqGrad.addColorStop(1, 'rgba(104, 128, 140, 0.38)');
       } else {
-        liqGrad.addColorStop(0, 'rgba(104, 212, 236, 0.7)');
-        liqGrad.addColorStop(0.42, 'rgba(34, 140, 182, 0.85)');
-        liqGrad.addColorStop(0.78, 'rgba(48, 168, 208, 0.9)');
-        liqGrad.addColorStop(1, 'rgba(34, 138, 182, 0.94)');
+        liqGrad.addColorStop(0, 'rgba(195, 212, 220, 0.08)');
+        liqGrad.addColorStop(0.35, 'rgba(146, 168, 178, 0.11)');
+        liqGrad.addColorStop(0.76, 'rgba(138, 162, 174, 0.18)');
+        liqGrad.addColorStop(1, 'rgba(164, 188, 200, 0.28)');
       }
     } else if (this.isLight) {
-      liqGrad.addColorStop(0, 'rgba(92, 198, 224, 0.72)');
-      liqGrad.addColorStop(0.45, 'rgba(34, 138, 178, 0.84)');
-      liqGrad.addColorStop(1, 'rgba(16, 86, 128, 0.94)');
+      liqGrad.addColorStop(0, 'rgba(176, 194, 202, 0.16)');
+      liqGrad.addColorStop(0.5, 'rgba(136, 156, 166, 0.24)');
+      liqGrad.addColorStop(1, 'rgba(98, 118, 130, 0.34)');
     } else {
-      liqGrad.addColorStop(0, 'rgba(104, 212, 236, 0.68)');
-      liqGrad.addColorStop(0.42, 'rgba(28, 126, 168, 0.82)');
-      liqGrad.addColorStop(1, 'rgba(12, 62, 102, 0.94)');
+      liqGrad.addColorStop(0, 'rgba(195, 212, 220, 0.09)');
+      liqGrad.addColorStop(0.48, 'rgba(138, 160, 172, 0.13)');
+      liqGrad.addColorStop(1, 'rgba(96, 118, 130, 0.22)');
     }
     ctx.fillStyle = liqGrad;
     ctx.fill();
 
     ctx.clip();
 
-    // Iluminación interna de refracción (núcleo luminoso izquierda-centro).
+    // Banda óptica oscura justo bajo el menisco (reflexión interna del techo del estudio en agua transparente).
+    const underMen = ctx.createLinearGradient(0, surfY, 0, surfY + Math.max(14 * this.dpr, (bottomY - surfY) * 0.22));
+    underMen.addColorStop(0, this.isLight ? 'rgba(32, 42, 48, 0.14)' : 'rgba(4, 6, 8, 0.55)');
+    underMen.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = underMen;
+    ctx.fillRect(this.cx - spanX, surfY, spanX * 2, Math.max(16 * this.dpr, (bottomY - surfY) * 0.24));
+
+    // Iluminación interna de refracción (key light desde arriba-izquierda atravesando el agua transparente).
     const refr = ctx.createRadialGradient(
-      this.cx - hw * 0.22,
-      isUpper ? surfY + (bottomY - surfY) * 0.4 : surfY + (bottomY - surfY) * 0.38,
-      hw * 0.08,
+      this.cx - hw * 0.32,
+      isUpper ? surfY + (bottomY - surfY) * 0.38 : surfY + (bottomY - surfY) * 0.36,
+      hw * 0.05,
       this.cx,
       (surfY + bottomY) * 0.5,
-      this.R * 1.08,
+      this.R * 0.98,
     );
-    refr.addColorStop(0, this.isLight ? 'rgba(215, 248, 255, 0.44)' : 'rgba(148, 235, 252, 0.32)');
-    refr.addColorStop(0.55, 'rgba(243, 212, 145, 0.07)');
-    refr.addColorStop(1, isUpper ? 'rgba(12, 48, 78, 0.14)' : 'rgba(4, 18, 34, 0.34)');
+    refr.addColorStop(0, this.isLight ? 'rgba(255, 255, 255, 0.48)' : 'rgba(240, 246, 250, 0.16)');
+    refr.addColorStop(0.45, 'rgba(220, 228, 232, 0.04)');
+    refr.addColorStop(1, isUpper ? 'rgba(6, 8, 10, 0.24)' : 'rgba(4, 6, 8, 0.42)');
     ctx.fillStyle = refr;
     ctx.fillRect(this.cx - spanX, surfY - 20 * this.dpr, spanX * 2, bottomY - surfY + 34 * this.dpr);
 
@@ -1075,54 +1085,54 @@ export class ClepsydraView {
             ? this.pendantBulb(b)
             : { bulbR: b * 0.92, bulbX: this.cx + this.tipX * 0.4, bulbCY: this.nozzleY + this.tipY * 0.42 };
 
-        // Lente cáustica suave en el hemisferio inferior del pandeo (crece orgánicamente al hincharse).
+        // Lente cáustica óptica clara en el hemisferio inferior del pandeo.
         const cg = ctx.createRadialGradient(
-          bulbX + bulbR * 0.06,
+          bulbX + bulbR * 0.08,
           bulbCY + bulbR * 0.38,
-          bulbR * 0.05,
+          bulbR * 0.04,
           bulbX,
           bulbCY + bulbR * 0.25,
           bulbR * 1.15,
         );
-        cg.addColorStop(0, `rgba(214, 248, 255, ${0.42 * lobeT})`);
-        cg.addColorStop(0.5, `rgba(130, 228, 250, ${0.16 * lobeT})`);
-        cg.addColorStop(1, 'rgba(40, 148, 192, 0)');
+        cg.addColorStop(0, `rgba(246, 250, 252, ${0.62 * lobeT})`);
+        cg.addColorStop(0.5, `rgba(210, 222, 228, ${0.22 * lobeT})`);
+        cg.addColorStop(1, 'rgba(160, 175, 184, 0)');
         ctx.fillStyle = cg;
         ctx.beginPath();
         ctx.arc(bulbX, bulbCY + bulbR * 0.2, bulbR * 1.25, 0, Math.PI * 2);
         ctx.fill();
 
-        // Suave reflejo especular difuso en el flanco izquierdo (sin punto blanco rígido).
+        // Suave reflejo especular arriba-izquierda (luz clave de estudio).
         const sg = ctx.createRadialGradient(
           bulbX - bulbR * 0.34,
-          bulbCY - bulbR * 0.14,
+          bulbCY - bulbR * 0.16,
           0,
           bulbX - bulbR * 0.34,
-          bulbCY - bulbR * 0.14,
+          bulbCY - bulbR * 0.16,
           bulbR * 0.46,
         );
-        sg.addColorStop(0, `rgba(240, 252, 255, ${0.44 * lobeT})`);
-        sg.addColorStop(1, 'rgba(240, 252, 255, 0)');
+        sg.addColorStop(0, `rgba(255, 255, 255, ${0.58 * lobeT})`);
+        sg.addColorStop(1, 'rgba(255, 255, 255, 0)');
         ctx.fillStyle = sg;
         ctx.beginPath();
-        ctx.arc(bulbX - bulbR * 0.34, bulbCY - bulbR * 0.14, bulbR * 0.46, 0, Math.PI * 2);
+        ctx.arc(bulbX - bulbR * 0.34, bulbCY - bulbR * 0.16, bulbR * 0.46, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
-    // Cáusticas submarinas bailando suavemente en el fondo del decantador inferior.
+    // Cáusticas ópticas neutras bailando suavemente en el fondo del decantador inferior.
     if (!isUpper) {
       const t = f.time * 0.0014;
-      const boost = 0.24 + this.causticPulse * 0.35;
+      const boost = 0.22 + this.causticPulse * 0.32;
       ctx.save();
       for (let k = -2; k <= 2; k++) {
         const cxOff = Math.sin(t * (1.1 + k * 0.17) + k * 1.6) * hw * 0.35 + k * hw * 0.22;
         const crx = hw * (0.22 + 0.06 * Math.cos(t + k));
         const cry = Math.max(3 * this.dpr, (bottomY - surfY) * 0.14);
         const cg = ctx.createRadialGradient(this.cx + cxOff, bottomY - 2 * this.dpr, 0, this.cx + cxOff, bottomY - 2 * this.dpr, crx);
-        cg.addColorStop(0, `rgba(195, 246, 255, ${boost})`);
-        cg.addColorStop(0.55, `rgba(248, 224, 165, ${boost * 0.45})`);
-        cg.addColorStop(1, 'rgba(140, 228, 255, 0)');
+        cg.addColorStop(0, `rgba(242, 246, 248, ${boost})`);
+        cg.addColorStop(0.55, `rgba(218, 206, 184, ${boost * 0.35})`);
+        cg.addColorStop(1, 'rgba(200, 210, 216, 0)');
         ctx.fillStyle = cg;
         ctx.beginPath();
         ctx.ellipse(this.cx + cxOff, bottomY - 2 * this.dpr, crx, cry, 0, 0, Math.PI * 2);
@@ -1183,13 +1193,16 @@ export class ClepsydraView {
       }
     }
 
-    // Oscurecimiento cilíndrico lateral junto al vidrio (da volumen real al líquido).
+    // Refracción cilíndrica lateral junto al vidrio (reflexión interna total nítida en agua cristalina).
     const sideShade = ctx.createLinearGradient(this.cx - hw, 0, this.cx + hw, 0);
-    sideShade.addColorStop(0, 'rgba(4, 18, 36, 0.42)');
-    sideShade.addColorStop(0.16, 'rgba(180, 242, 255, 0.11)');
-    sideShade.addColorStop(0.45, 'rgba(255, 255, 255, 0)');
-    sideShade.addColorStop(0.84, 'rgba(245, 218, 160, 0.07)');
-    sideShade.addColorStop(1, 'rgba(4, 18, 36, 0.46)');
+    sideShade.addColorStop(0, 'rgba(236, 244, 248, 0.38)');
+    sideShade.addColorStop(0.055, 'rgba(6, 8, 10, 0.54)');
+    sideShade.addColorStop(0.14, 'rgba(236, 244, 248, 0.2)');
+    sideShade.addColorStop(0.32, 'rgba(255, 255, 255, 0)');
+    sideShade.addColorStop(0.76, 'rgba(255, 255, 255, 0)');
+    sideShade.addColorStop(0.88, 'rgba(224, 216, 200, 0.13)');
+    sideShade.addColorStop(0.95, 'rgba(6, 8, 10, 0.56)');
+    sideShade.addColorStop(1, 'rgba(228, 236, 240, 0.28)');
     ctx.fillStyle = sideShade;
     ctx.fillRect(this.cx - spanX, surfY - 18 * this.dpr, spanX * 2, bottomY - surfY + 30 * this.dpr);
     ctx.restore();
@@ -1222,11 +1235,11 @@ export class ClepsydraView {
     ctx.closePath();
 
     const topSurfGrad = ctx.createLinearGradient(this.cx - hwArch, surfY - menRy, this.cx + hwArch, surfY + menRy);
-    topSurfGrad.addColorStop(0, 'rgba(130, 224, 248, 0.34)');
-    topSurfGrad.addColorStop(0.32, 'rgba(225, 250, 255, 0.62)');
-    topSurfGrad.addColorStop(0.58, 'rgba(250, 236, 198, 0.38)');
-    topSurfGrad.addColorStop(0.82, 'rgba(120, 218, 245, 0.35)');
-    topSurfGrad.addColorStop(1, 'rgba(90, 196, 230, 0.28)');
+    topSurfGrad.addColorStop(0, 'rgba(186, 198, 204, 0.22)');
+    topSurfGrad.addColorStop(0.28, 'rgba(244, 248, 250, 0.44)');
+    topSurfGrad.addColorStop(0.56, 'rgba(216, 212, 202, 0.22)');
+    topSurfGrad.addColorStop(0.84, 'rgba(176, 188, 196, 0.2)');
+    topSurfGrad.addColorStop(1, 'rgba(130, 142, 150, 0.16)');
     ctx.fillStyle = topSurfGrad;
     ctx.fill();
 
@@ -1250,26 +1263,26 @@ export class ClepsydraView {
         ctx.lineTo(x, y);
       }
     }
-    ctx.strokeStyle = this.isLight ? 'rgba(255, 255, 255, 0.85)' : 'rgba(218, 248, 255, 0.86)';
-    ctx.lineWidth = Math.max(1.2, 1.45 * this.dpr);
+    ctx.strokeStyle = this.isLight ? 'rgba(255, 255, 255, 0.88)' : 'rgba(242, 246, 250, 0.78)';
+    ctx.lineWidth = Math.max(1.25, 1.5 * this.dpr);
     ctx.stroke();
     ctx.restore();
   }
 
   /**
-   * Sombreado translúcido exactamente hermanado con el fondo del agua superior:
-   * misma paleta mineral, lente cáustica suave (sin punto blanco rígido ni borde oscuro).
+   * Gota de agua óptica transparente en estudio oscuro:
+   * cuerpo refractivo casi incoloro, lente cáustica inferior y destello softbox arriba-izquierda.
    */
   private fillWaterDrop(ctx: CanvasRenderingContext2D, x: number, cy: number, r: number, topY: number): void {
-    const bodyGrad = ctx.createLinearGradient(x - r * 0.2, topY, x + r * 0.25, cy + r);
+    const bodyGrad = ctx.createLinearGradient(x - r * 0.25, topY, x + r * 0.3, cy + r);
     if (this.isLight) {
-      bodyGrad.addColorStop(0, 'rgba(62, 182, 218, 0.91)');
-      bodyGrad.addColorStop(0.55, 'rgba(46, 162, 202, 0.92)');
-      bodyGrad.addColorStop(1, 'rgba(32, 134, 178, 0.95)');
+      bodyGrad.addColorStop(0, 'rgba(182, 196, 204, 0.42)');
+      bodyGrad.addColorStop(0.55, 'rgba(142, 160, 170, 0.48)');
+      bodyGrad.addColorStop(1, 'rgba(104, 122, 134, 0.58)');
     } else {
-      bodyGrad.addColorStop(0, 'rgba(54, 174, 212, 0.9)');
-      bodyGrad.addColorStop(0.55, 'rgba(40, 152, 194, 0.92)');
-      bodyGrad.addColorStop(1, 'rgba(26, 118, 164, 0.95)');
+      bodyGrad.addColorStop(0, 'rgba(196, 210, 218, 0.32)');
+      bodyGrad.addColorStop(0.55, 'rgba(136, 154, 164, 0.42)');
+      bodyGrad.addColorStop(1, 'rgba(82, 100, 112, 0.54)');
     }
     ctx.fillStyle = bodyGrad;
     ctx.fill();
@@ -1277,28 +1290,28 @@ export class ClepsydraView {
     ctx.save();
     ctx.clip();
 
-    // Lente cáustica suave en el hemisferio inferior (exactamente igual que el lóbulo antes de soltarse).
-    const caustic = ctx.createRadialGradient(x + r * 0.06, cy + r * 0.38, r * 0.05, x, cy + r * 0.25, r * 1.12);
-    caustic.addColorStop(0, 'rgba(214, 248, 255, 0.45)');
-    caustic.addColorStop(0.5, 'rgba(130, 228, 250, 0.18)');
-    caustic.addColorStop(1, 'rgba(36, 140, 184, 0)');
+    // Lente cáustica brillante en el hemisferio inferior (efecto óptico real de gota de agua).
+    const caustic = ctx.createRadialGradient(x + r * 0.08, cy + r * 0.38, r * 0.04, x, cy + r * 0.24, r * 1.1);
+    caustic.addColorStop(0, 'rgba(248, 252, 255, 0.78)');
+    caustic.addColorStop(0.45, 'rgba(216, 228, 234, 0.32)');
+    caustic.addColorStop(1, 'rgba(140, 158, 168, 0)');
     ctx.fillStyle = caustic;
     ctx.beginPath();
     ctx.arc(x, cy + r * 0.2, r * 1.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Reflejo especular difuso arriba-izquierda (sin borde duro).
-    const spec = ctx.createRadialGradient(x - r * 0.34, cy - r * 0.14, 0, x - r * 0.34, cy - r * 0.14, r * 0.46);
-    spec.addColorStop(0, 'rgba(242, 252, 255, 0.48)');
-    spec.addColorStop(1, 'rgba(242, 252, 255, 0)');
+    // Reflejo especular de softbox arriba-izquierda.
+    const spec = ctx.createRadialGradient(x - r * 0.34, cy - r * 0.16, 0, x - r * 0.34, cy - r * 0.16, r * 0.44);
+    spec.addColorStop(0, 'rgba(255, 255, 255, 0.72)');
+    spec.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = spec;
     ctx.beginPath();
-    ctx.arc(x - r * 0.34, cy - r * 0.14, r * 0.46, 0, Math.PI * 2);
+    ctx.arc(x - r * 0.34, cy - r * 0.16, r * 0.44, 0, Math.PI * 2);
     ctx.fill();
 
-    // Fino brillo refractario en el contorno (en lugar de borde oscuro artificial).
-    ctx.strokeStyle = this.isLight ? 'rgba(220, 248, 255, 0.3)' : 'rgba(165, 232, 250, 0.24)';
-    ctx.lineWidth = Math.max(0.85, 1.05 * this.dpr);
+    // Contorno refractivo fino (reflexión interna en el borde de la gota).
+    ctx.strokeStyle = this.isLight ? 'rgba(60, 74, 84, 0.34)' : 'rgba(232, 240, 246, 0.44)';
+    ctx.lineWidth = Math.max(0.9, 1.1 * this.dpr);
     ctx.stroke();
     ctx.restore();
   }
@@ -1350,24 +1363,24 @@ export class ClepsydraView {
     ctx.restore();
   }
 
-  /** Fondo trasero de la peana y del anillo de suspensión (se dibuja detrás del vidrio). */
+  /** Fondo trasero de la peana, columna trasera y aros de sujeción (detrás del vidrio). */
   private drawHardwareBack(ctx: CanvasRenderingContext2D): void {
-    const isLight = this.isLight;
+    const pal = studioPalette(this.isLight);
     const botTopY = this.botY + this.capThick * 0.08;
 
     ctx.save();
-    // 1. Disco superior de la peana inferior.
+    // 1. Disco superior de la peana inferior (acero pavonado neutro, idéntico al reloj de arena).
     const discGrad = ctx.createLinearGradient(this.cx - this.capHalf, botTopY, this.cx + this.capHalf, botTopY);
-    if (isLight) {
-      discGrad.addColorStop(0, '#c2cad8');
-      discGrad.addColorStop(0.32, '#edf1f7');
-      discGrad.addColorStop(0.68, '#d4dce8');
-      discGrad.addColorStop(1, '#aeb8ca');
+    if (pal.isLight) {
+      discGrad.addColorStop(0, '#babdc3');
+      discGrad.addColorStop(0.28, '#e8eaee');
+      discGrad.addColorStop(0.68, '#cfd2d8');
+      discGrad.addColorStop(1, '#a3a7ae');
     } else {
-      discGrad.addColorStop(0, '#141b29');
-      discGrad.addColorStop(0.28, '#2b374e');
-      discGrad.addColorStop(0.62, '#1e273a');
-      discGrad.addColorStop(1, '#101622');
+      discGrad.addColorStop(0, '#131417');
+      discGrad.addColorStop(0.26, '#2b2e34');
+      discGrad.addColorStop(0.62, '#1d1f24');
+      discGrad.addColorStop(1, '#0e0f12');
     }
     ctx.fillStyle = discGrad;
     ctx.beginPath();
@@ -1375,27 +1388,44 @@ export class ClepsydraView {
     ctx.fill();
 
     // Rebaje circular oscuro donde encaja la base gruesa del decantador.
-    const seatRx = this.lowerProfile(1) * this.R * 1.03;
-    ctx.fillStyle = isLight ? 'rgba(40, 54, 78, 0.16)' : 'rgba(4, 7, 14, 0.65)';
+    const seatRx = this.lowerProfile(1) * this.R * 1.04;
+    ctx.fillStyle = pal.isLight ? 'rgba(30, 32, 36, 0.18)' : 'rgba(4, 5, 6, 0.78)';
     ctx.beginPath();
-    ctx.ellipse(this.cx, botTopY + this.capRy * 0.04, seatRx, this.capRy * 0.62, 0, 0, Math.PI * 2);
+    ctx.ellipse(this.cx, botTopY + this.capRy * 0.04, seatRx, this.capRy * 0.65, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. Mitad trasera del anillo de suspensión en oro champán alrededor de la ampolla superior.
+    // Columna trasera del trípode (mismo lenguaje estructural que el reloj de arena).
+    const rw = Math.max(1.8 * this.dpr, this.R * 0.022);
+    const y0 = this.topY - this.capThick * 0.1;
+    const y1 = this.botY + this.capThick * 0.08;
+    ctx.save();
+    ctx.globalAlpha = pal.isLight ? 0.14 : 0.15;
+    const rearG = ctx.createLinearGradient(this.cx - rw, 0, this.cx + rw, 0);
+    rearG.addColorStop(0, '#111214');
+    rearG.addColorStop(0.36, '#8a8d94');
+    rearG.addColorStop(1, '#111214');
+    ctx.fillStyle = rearG;
+    ctx.fillRect(this.cx - rw, y0, rw * 2, y1 - y0);
+    ctx.restore();
+
+    // 2. Mitad trasera de ambos aros de sujeción en latón envejecido (superior e inferior) unidos al bastidor.
     const ringRx = this.pillarX;
     const ringRy = Math.max(5 * this.dpr, ringRx * 0.085);
-    ctx.beginPath();
-    ctx.ellipse(this.cx, this.waistRingY, ringRx, ringRy, 0, Math.PI, Math.PI * 2);
-    ctx.strokeStyle = isLight ? 'rgba(130, 96, 40, 0.45)' : 'rgba(165, 124, 52, 0.42)';
-    ctx.lineWidth = Math.max(2.4 * this.dpr, this.R * 0.032);
-    ctx.stroke();
+    const rearRingColor = pal.isLight ? 'rgba(122, 99, 62, 0.42)' : 'rgba(155, 129, 86, 0.36)';
+    for (const ryPos of [this.waistRingY, this.lowerRingY]) {
+      ctx.beginPath();
+      ctx.ellipse(this.cx, ryPos, ringRx, ringRy, 0, Math.PI, Math.PI * 2);
+      ctx.strokeStyle = rearRingColor;
+      ctx.lineWidth = Math.max(2.4 * this.dpr, this.R * 0.032);
+      ctx.stroke();
+    }
 
     // 3. Borde trasero sutil de la boca superior (detrás de la columna de agua).
     const tipOuter = Math.max(3.2 * this.dpr, this.upperProfile(1) * this.R);
     const tipRy = Math.max(1.2 * this.dpr, tipOuter * 0.22);
     ctx.beginPath();
     ctx.ellipse(this.cx, this.nozzleY, tipOuter, tipRy, 0, Math.PI + 0.08, Math.PI * 2 - 0.08);
-    ctx.strokeStyle = isLight ? 'rgba(28, 48, 76, 0.16)' : 'rgba(185, 224, 250, 0.18)';
+    ctx.strokeStyle = pal.isLight ? 'rgba(40, 44, 50, 0.18)' : 'rgba(224, 228, 234, 0.2)';
     ctx.lineWidth = Math.max(0.9, 1.05 * this.dpr);
     ctx.stroke();
 
@@ -1404,37 +1434,29 @@ export class ClepsydraView {
     const mouthRy = Math.max(4.5 * this.dpr, mouthRx * 0.125);
     ctx.beginPath();
     ctx.ellipse(this.cx, this.lowerTopY, mouthRx, mouthRy, 0, Math.PI, Math.PI * 2);
-    ctx.strokeStyle = isLight ? 'rgba(28, 48, 76, 0.24)' : 'rgba(195, 228, 255, 0.24)';
+    ctx.strokeStyle = pal.isLight ? 'rgba(40, 44, 50, 0.22)' : 'rgba(224, 228, 234, 0.24)';
     ctx.lineWidth = Math.max(1.3, 1.6 * this.dpr);
     ctx.stroke();
     ctx.restore();
   }
 
-  /** Doble pared óptica de cristal borosilicato, base sólida gruesa, boquilla 3D y reflejos softbox. */
+  /** Doble pared óptica de cristal borosilicato neutro, base sólida gruesa, boquilla 3D y reflejos softbox. */
   private drawGlassFront(ctx: CanvasRenderingContext2D): void {
-    const isLight = this.isLight;
-    const rim = isLight ? 'rgba(26, 44, 72, 0.28)' : 'rgba(198, 228, 255, 0.3)';
-    const innerEdge = isLight ? 'rgba(20, 38, 62, 0.14)' : 'rgba(6, 14, 26, 0.42)';
-    const hi = isLight ? 'rgba(255, 255, 255, 0.84)' : 'rgba(232, 246, 255, 0.36)';
+    const pal = studioPalette(this.isLight);
+    const rim = pal.glassOuterEdge;
+    const innerEdge = pal.glassInnerEdge;
+    const hi = pal.glassShine;
 
     // 1. Paredes laterales abiertas de la ampolla superior + embudo continuo hasta la boquilla.
     const uSteps = 52;
     const uh = this.nozzleY - this.topY;
     ctx.save();
     const wallGrad = ctx.createLinearGradient(this.cx - this.R, 0, this.cx + this.R, 0);
-    if (isLight) {
-      wallGrad.addColorStop(0, 'rgba(24, 46, 74, 0.26)');
-      wallGrad.addColorStop(0.2, 'rgba(255, 255, 255, 0.72)');
-      wallGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.24)');
-      wallGrad.addColorStop(0.82, 'rgba(255, 255, 255, 0.66)');
-      wallGrad.addColorStop(1, 'rgba(24, 46, 74, 0.28)');
-    } else {
-      wallGrad.addColorStop(0, 'rgba(170, 218, 252, 0.28)');
-      wallGrad.addColorStop(0.2, 'rgba(232, 246, 255, 0.14)');
-      wallGrad.addColorStop(0.5, 'rgba(160, 214, 248, 0.08)');
-      wallGrad.addColorStop(0.84, 'rgba(245, 224, 178, 0.14)');
-      wallGrad.addColorStop(1, 'rgba(170, 218, 252, 0.26)');
-    }
+    wallGrad.addColorStop(0, pal.glassWallLeft);
+    wallGrad.addColorStop(0.2, pal.isLight ? 'rgba(255, 255, 255, 0.7)' : 'rgba(240, 242, 246, 0.13)');
+    wallGrad.addColorStop(0.5, pal.glassWallMid);
+    wallGrad.addColorStop(0.84, pal.isLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(220, 212, 198, 0.1)');
+    wallGrad.addColorStop(1, pal.glassWallRight);
 
     for (const side of [-1, 1]) {
       // Franja sólida de pared de vidrio en el costado `side` (termina abierta en nozzleY).
@@ -1482,23 +1504,22 @@ export class ClepsydraView {
       ctx.stroke();
     }
 
-    // Labio frontal de la boquilla con gradiente Fresnel real: nítido en los biseles laterales
-    // y casi transparente en el centro donde el vidrio moja con el agua (nunca corta el líquido).
+    // Labio frontal de la boquilla con gradiente Fresnel neutro.
     const tipOuter = Math.max(3.2 * this.dpr, this.upperProfile(1) * this.R);
     const tipRy = Math.max(1.2 * this.dpr, tipOuter * 0.22);
     const lipGrad = ctx.createLinearGradient(this.cx - tipOuter, 0, this.cx + tipOuter, 0);
-    if (isLight) {
-      lipGrad.addColorStop(0, 'rgba(36, 62, 92, 0.42)');
+    if (pal.isLight) {
+      lipGrad.addColorStop(0, 'rgba(42, 46, 52, 0.42)');
       lipGrad.addColorStop(0.22, 'rgba(255, 255, 255, 0.62)');
       lipGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.14)');
       lipGrad.addColorStop(0.78, 'rgba(255, 255, 255, 0.52)');
-      lipGrad.addColorStop(1, 'rgba(36, 62, 92, 0.4)');
+      lipGrad.addColorStop(1, 'rgba(42, 46, 52, 0.4)');
     } else {
-      lipGrad.addColorStop(0, 'rgba(195, 232, 255, 0.5)');
-      lipGrad.addColorStop(0.24, 'rgba(218, 245, 255, 0.26)');
-      lipGrad.addColorStop(0.5, 'rgba(180, 230, 252, 0.1)');
-      lipGrad.addColorStop(0.76, 'rgba(218, 245, 255, 0.24)');
-      lipGrad.addColorStop(1, 'rgba(195, 232, 255, 0.46)');
+      lipGrad.addColorStop(0, 'rgba(226, 232, 238, 0.48)');
+      lipGrad.addColorStop(0.24, 'rgba(240, 244, 248, 0.28)');
+      lipGrad.addColorStop(0.5, 'rgba(220, 226, 232, 0.12)');
+      lipGrad.addColorStop(0.76, 'rgba(240, 244, 248, 0.24)');
+      lipGrad.addColorStop(1, 'rgba(226, 232, 238, 0.44)');
     }
     ctx.beginPath();
     ctx.ellipse(this.cx, this.nozzleY, tipOuter, tipRy, 0, 0.04, Math.PI - 0.04);
@@ -1557,15 +1578,15 @@ export class ClepsydraView {
     ctx.fillStyle = wallGrad;
     ctx.fill(lowerWallBand, 'evenodd');
 
-    // Refracción luminosa azul-dorada dentro de la base sólida gruesa del vaso inferior.
+    // Refracción óptica neutra dentro de la base sólida gruesa del vaso inferior.
     const baseGlassY = this.lowerInnerFloorY();
     const baseH = this.lowerBaseGlassH();
     const baseRx = this.lowerProfile(0.95) * this.R;
     const baseGlow = ctx.createLinearGradient(this.cx - baseRx, baseGlassY, this.cx + baseRx, this.botY);
-    baseGlow.addColorStop(0, 'rgba(92, 200, 232, 0.14)');
-    baseGlow.addColorStop(0.32, `rgba(180, 240, 255, ${0.26 + this.causticPulse * 0.18})`);
-    baseGlow.addColorStop(0.65, `rgba(243, 212, 145, ${0.14 + this.causticPulse * 0.12})`);
-    baseGlow.addColorStop(1, 'rgba(60, 168, 208, 0.12)');
+    baseGlow.addColorStop(0, 'rgba(216, 222, 228, 0.08)');
+    baseGlow.addColorStop(0.32, `rgba(240, 244, 248, ${0.18 + this.causticPulse * 0.14})`);
+    baseGlow.addColorStop(0.65, `rgba(216, 204, 182, ${0.1 + this.causticPulse * 0.08})`);
+    baseGlow.addColorStop(1, 'rgba(190, 198, 206, 0.08)');
     ctx.save();
     ctx.clip(lowerWallBand, 'evenodd');
     ctx.fillStyle = baseGlow;
@@ -1599,13 +1620,13 @@ export class ClepsydraView {
     ctx.lineWidth = Math.max(1.25, 1.5 * this.dpr);
     ctx.stroke();
 
-    // Labio frontal brillante de la boca abierta 3D del decantador inferior.
+    // Labio frontal pulido de la boca abierta 3D del decantador inferior.
     const mouthRx = this.lowerProfile(0) * this.R;
     const mouthRy = Math.max(4.5 * this.dpr, mouthRx * 0.125);
     ctx.beginPath();
     ctx.ellipse(this.cx, this.lowerTopY, mouthRx, mouthRy, 0, 0.02, Math.PI - 0.02);
-    ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.84)' : 'rgba(225, 246, 255, 0.56)';
-    ctx.lineWidth = Math.max(1.5, 1.85 * this.dpr);
+    ctx.strokeStyle = pal.isLight ? 'rgba(255, 255, 255, 0.84)' : 'rgba(238, 242, 246, 0.46)';
+    ctx.lineWidth = Math.max(1.4, 1.7 * this.dpr);
     ctx.stroke();
 
     // 3. Reflejos curvos de softbox de estudio sobre ambas piezas de cristal (se deslizan sutilmente al inclinar).
@@ -1617,11 +1638,7 @@ export class ClepsydraView {
       [0.82, 0.04, 0.52, true],
     ] as const) {
       const k = Math.max(-0.89, Math.min(0.89, kBase + specShift));
-      const col = warm
-        ? isLight
-          ? 'rgba(242, 214, 152, 0.48)'
-          : 'rgba(255, 228, 170, 0.28)'
-        : hi;
+      const col = warm ? pal.glassRimWarm : hi;
       // Ampolla superior (sigue la curva del embudo de forma natural hasta cerca de la boca).
       const y0 = this.topY + (this.nozzleY - this.topY) * 0.08;
       const y1 = this.topY + (this.nozzleY - this.topY) * 0.92;
@@ -1695,8 +1712,8 @@ export class ClepsydraView {
         const len = (major ? 10 : 5) * this.dpr;
         const xRight = this.cx + hw - 3 * this.dpr;
         ctx.strokeStyle = this.isLight
-          ? `rgba(24, 42, 68, ${major ? 0.3 : 0.14})`
-          : `rgba(210, 236, 255, ${major ? 0.32 : 0.14})`;
+          ? `rgba(40, 44, 50, ${major ? 0.28 : 0.13})`
+          : `rgba(226, 230, 236, ${major ? 0.28 : 0.12})`;
         ctx.lineWidth = Math.max(0.8, 0.9 * this.dpr);
         ctx.beginPath();
         ctx.moveTo(xRight, y);
@@ -1704,7 +1721,7 @@ export class ClepsydraView {
         ctx.stroke();
 
         if (major) {
-          ctx.fillStyle = this.isLight ? 'rgba(24, 42, 68, 0.34)' : 'rgba(210, 236, 255, 0.36)';
+          ctx.fillStyle = this.isLight ? 'rgba(40, 44, 50, 0.34)' : 'rgba(226, 230, 236, 0.34)';
           ctx.fillText('50 %', xRight - len - 4 * this.dpr, y + 1.2 * this.dpr);
         }
       }
@@ -1720,112 +1737,71 @@ export class ClepsydraView {
 
     if (span >= 2) {
       ctx.textAlign = 'left';
-      ctx.fillStyle = this.isLight ? 'rgba(24, 42, 68, 0.38)' : 'rgba(210, 236, 255, 0.36)';
+      ctx.fillStyle = this.isLight ? 'rgba(40, 44, 50, 0.38)' : 'rgba(220, 224, 230, 0.36)';
       ctx.fillText(String(endYear), this.cx + this.pillarX + 8 * this.dpr, upperTop + 8 * this.dpr);
       ctx.fillText(String(startYear), this.cx + this.pillarX + 8 * this.dpr, lowerFloor - 8 * this.dpr);
     }
     ctx.restore();
   }
 
-  /** Columnas metálicas, anillo de suspensión frontal en oro champán y pedestales 3D torneados. */
+  /** Columnas de acero pavonado, aros de sujeción superior e inferior en latón envejecido y pedestales 3D. */
   private drawHardwareFront(ctx: CanvasRenderingContext2D): void {
-    const isLight = this.isLight;
+    const pal = studioPalette(this.isLight);
     const pw = Math.max(2.6 * this.dpr, Math.min(5 * this.dpr, this.R * 0.042));
     const yTop = this.topY - this.capThick * 0.05;
     const yBot = this.botY + this.capThick * 0.12;
 
-    // 1. Arco frontal del anillo de suspensión en oro champán (abraza la ampolla superior en 3D).
+    // 1. Arcos frontales de ambos aros de latón envejecido (sujetan ampolla superior y decantador inferior al bastidor).
     const ringRx = this.pillarX;
     const ringRy = Math.max(5 * this.dpr, ringRx * 0.085);
-    const goldRing = ctx.createLinearGradient(this.cx - ringRx, 0, this.cx + ringRx, 0);
-    goldRing.addColorStop(0, '#6b4e1e');
-    goldRing.addColorStop(0.24, '#f5d88e');
-    goldRing.addColorStop(0.5, '#ba8c3e');
-    goldRing.addColorStop(0.82, '#ecd084');
-    goldRing.addColorStop(1, '#5c4116');
+    const brassRing = agedBrassGradient(ctx, this.cx - ringRx, this.cx + ringRx, pal);
     ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(this.cx, this.waistRingY, ringRx, ringRy, 0, 0.02, Math.PI - 0.02);
-    ctx.strokeStyle = goldRing;
-    ctx.lineWidth = Math.max(2.6 * this.dpr, this.R * 0.036);
-    ctx.stroke();
+    for (const ryPos of [this.waistRingY, this.lowerRingY]) {
+      ctx.beginPath();
+      ctx.ellipse(this.cx, ryPos, ringRx, ringRy, 0, 0.02, Math.PI - 0.02);
+      ctx.strokeStyle = brassRing;
+      ctx.lineWidth = Math.max(2.6 * this.dpr, this.R * 0.036);
+      ctx.stroke();
+    }
     ctx.restore();
 
-    // 2. Dos columnas cilíndricas laterales en titanio cepillado + casquillos de oro champán.
+    // 2. Dos columnas cilíndricas laterales en acero pavonado + casquillos torneados en latón envejecido.
     for (const side of [-1, 1]) {
       const px = this.cx + side * this.pillarX;
-      const g = ctx.createLinearGradient(px - pw, 0, px + pw, 0);
-      if (isLight) {
-        g.addColorStop(0, '#8d98ab');
-        g.addColorStop(0.32, '#f5f8fc');
-        g.addColorStop(0.55, '#bcc6d6');
-        g.addColorStop(0.82, '#e2e8f2');
-        g.addColorStop(1, '#7d889c');
-      } else {
-        g.addColorStop(0, '#0e1320');
-        g.addColorStop(0.3, '#526382');
-        g.addColorStop(0.52, '#222d42');
-        g.addColorStop(0.8, '#3f4f6d');
-        g.addColorStop(1, '#0b101b');
-      }
-      ctx.fillStyle = g;
+      ctx.fillStyle = gunmetalGradient(ctx, px - pw, px + pw, pal);
       ctx.fillRect(px - pw, yTop, pw * 2, yBot - yTop);
 
       const fw = pw * 1.5;
       const fh = Math.max(4.5 * this.dpr, this.capThick * 0.36);
-      for (const fy of [this.topY + this.capRy * 0.12, this.waistRingY - fh * 0.5, yBot - fh]) {
-        const fg = ctx.createLinearGradient(px - fw, 0, px + fw, 0);
-        fg.addColorStop(0, '#6b4e1e');
-        fg.addColorStop(0.3, '#f3d58d');
-        fg.addColorStop(0.58, '#b88b3d');
-        fg.addColorStop(0.84, '#e5c172');
-        fg.addColorStop(1, '#583f16');
-        ctx.fillStyle = fg;
+      for (const fy of [
+        this.topY + this.capRy * 0.12,
+        this.waistRingY - fh * 0.5,
+        this.lowerRingY - fh * 0.5,
+        yBot - fh,
+      ]) {
+        ctx.fillStyle = agedBrassGradient(ctx, px - fw, px + fw, pal);
         ctx.beginPath();
         ctx.roundRect(px - fw, fy, fw * 2, fh, fh * 0.35);
         ctx.fill();
       }
     }
 
-    // 3. Corona superior y base inferior torneadas en 3D (idéntico lenguaje al reloj de arena).
+    // 3. Corona superior y base inferior torneadas en 3D (idéntico acabado y familia que el reloj de arena).
     const drawCylinderCap = (faceY: number, isTop: boolean) => {
       const rx = this.capHalf;
       const ry = this.capRy;
       const botFaceY = faceY + this.capThick;
       ctx.save();
-      const wallGrad = ctx.createLinearGradient(this.cx - rx, 0, this.cx + rx, 0);
-      if (isLight) {
-        wallGrad.addColorStop(0, '#96a1b5');
-        wallGrad.addColorStop(0.22, '#eef2f8');
-        wallGrad.addColorStop(0.45, '#c6cfde');
-        wallGrad.addColorStop(0.72, '#9faac0');
-        wallGrad.addColorStop(0.88, '#e3e9f3');
-        wallGrad.addColorStop(1, '#8490a6');
-      } else {
-        wallGrad.addColorStop(0, '#0d121e');
-        wallGrad.addColorStop(0.2, '#3d4c68');
-        wallGrad.addColorStop(0.34, '#56698a');
-        wallGrad.addColorStop(0.56, '#1f293d');
-        wallGrad.addColorStop(0.78, '#141b2a');
-        wallGrad.addColorStop(0.9, '#394863');
-        wallGrad.addColorStop(1, '#0b101b');
-      }
       ctx.beginPath();
       ctx.ellipse(this.cx, botFaceY, rx, ry, 0, 0, Math.PI);
       ctx.lineTo(this.cx - rx, faceY);
       ctx.ellipse(this.cx, faceY, rx, ry, 0, Math.PI, 0, true);
       ctx.closePath();
-      ctx.fillStyle = wallGrad;
+      ctx.fillStyle = gunmetalGradient(ctx, this.cx - rx, this.cx + rx, pal);
       ctx.fill();
 
-      // Filete biselado en oro champán.
-      const goldGrad = ctx.createLinearGradient(this.cx - rx, 0, this.cx + rx, 0);
-      goldGrad.addColorStop(0, 'rgba(120, 86, 30, 0.55)');
-      goldGrad.addColorStop(0.26, 'rgba(252, 224, 152, 0.92)');
-      goldGrad.addColorStop(0.55, 'rgba(186, 138, 56, 0.72)');
-      goldGrad.addColorStop(0.84, 'rgba(246, 212, 132, 0.85)');
-      goldGrad.addColorStop(1, 'rgba(110, 78, 26, 0.55)');
-      ctx.strokeStyle = goldGrad;
+      // Filete biselado en latón envejecido.
+      ctx.strokeStyle = agedBrassGradient(ctx, this.cx - rx, this.cx + rx, pal, 0.88);
       ctx.lineWidth = Math.max(1.2, 1.45 * this.dpr);
       ctx.beginPath();
       ctx.ellipse(this.cx, isTop ? botFaceY - 1.2 * this.dpr : faceY + 1.2 * this.dpr, rx * 0.995, ry * 0.98, 0, 0.04, Math.PI - 0.04);
@@ -1833,34 +1809,43 @@ export class ClepsydraView {
 
       if (isTop) {
         const topGrad = ctx.createLinearGradient(this.cx - rx, faceY - ry, this.cx + rx, faceY + ry);
-        if (isLight) {
-          topGrad.addColorStop(0, '#f7f9fc');
-          topGrad.addColorStop(0.5, '#d5dde9');
-          topGrad.addColorStop(1, '#b8c2d4');
+        if (pal.isLight) {
+          topGrad.addColorStop(0, '#f4f5f7');
+          topGrad.addColorStop(0.5, '#d5d7dc');
+          topGrad.addColorStop(1, '#b6b9c0');
         } else {
-          topGrad.addColorStop(0, '#364561');
-          topGrad.addColorStop(0.42, '#222c40');
-          topGrad.addColorStop(1, '#121826');
+          topGrad.addColorStop(0, '#33363c');
+          topGrad.addColorStop(0.42, '#202226');
+          topGrad.addColorStop(1, '#111215');
         }
         ctx.fillStyle = topGrad;
         ctx.beginPath();
         ctx.ellipse(this.cx, faceY, rx, ry, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.7)' : 'rgba(220, 238, 255, 0.16)';
+        ctx.strokeStyle = pal.isLight ? 'rgba(255, 255, 255, 0.65)' : 'rgba(235, 237, 240, 0.13)';
         ctx.lineWidth = Math.max(0.9, 1 * this.dpr);
         ctx.beginPath();
         ctx.ellipse(this.cx, faceY, rx * 0.84, ry * 0.82, 0, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(225, 240, 255, 0.24)';
+        // Reborde frontal del asiento mecanizado donde descansa el decantador inferior.
+        ctx.strokeStyle = pal.isLight ? 'rgba(255, 255, 255, 0.68)' : 'rgba(235, 237, 240, 0.18)';
         ctx.lineWidth = Math.max(1, 1.15 * this.dpr);
         ctx.beginPath();
         ctx.ellipse(this.cx, faceY, rx * 0.99, ry * 0.98, 0, 0.06, Math.PI - 0.06);
         ctx.stroke();
+
+        // Anillo metálico sutil abrazando la base del cristal para soldarlo visualmente a la peana.
+        const seatRx = this.lowerProfile(1) * this.R * 1.03;
+        ctx.strokeStyle = agedBrassGradient(ctx, this.cx - seatRx, this.cx + seatRx, pal, 0.55);
+        ctx.lineWidth = Math.max(1.1, 1.3 * this.dpr);
+        ctx.beginPath();
+        ctx.ellipse(this.cx, faceY - this.capRy * 0.08, seatRx, this.capRy * 0.62, 0, 0.06, Math.PI - 0.06);
+        ctx.stroke();
       }
 
-      ctx.strokeStyle = isLight ? 'rgba(25, 38, 60, 0.22)' : 'rgba(0, 0, 0, 0.52)';
+      ctx.strokeStyle = pal.isLight ? 'rgba(20, 22, 26, 0.22)' : 'rgba(0, 0, 0, 0.58)';
       ctx.lineWidth = Math.max(1, 1.1 * this.dpr);
       ctx.beginPath();
       ctx.ellipse(this.cx, botFaceY, rx, ry, 0, 0.02, Math.PI - 0.02);
@@ -1893,40 +1878,21 @@ export class ClepsydraView {
       this.neckRatio = 1;
     }
 
-    // 1. Iluminación ambiental de estudio (halo zafiro frío + reflejo cálido sutil).
-    const haloR = Math.max(W, H) * 0.44;
-    const midY = (this.topY + this.botY) * 0.5;
-    const halo = ctx.createRadialGradient(this.cx - this.R * 0.35, midY - this.R * 0.4, this.R * 0.15, this.cx, midY, haloR);
-    halo.addColorStop(0, this.isLight ? 'rgba(64, 172, 212, 0.16)' : 'rgba(56, 178, 222, 0.13)');
-    halo.addColorStop(0.55, this.isLight ? 'rgba(235, 195, 110, 0.06)' : 'rgba(243, 196, 107, 0.05)');
-    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(0, 0, W, H);
-
-    // 2. Sombra de contacto anclada en horizontal sobre la «mesa» (se desplaza y suaviza al levantar la peana).
+    // 1. Plano de estudio común y sombra de contacto direccional coherente (se suaviza al inclinar).
     const baseBotY = this.botY + this.capThick * 1.1;
     const sinA = Math.sin(this.clockAngle);
     const lift = Math.abs(sinA);
-    const shadowBaseX = this.cx + this.clockX + sinA * this.capHalf * 0.32;
-    for (const [xOff, yOff, wMul, hMul, alpha] of [
-      [0, this.capRy * (0.9 + lift * 0.35), 1.38 + lift * 0.24, 1.9 + lift * 0.3, 0.68 * (1 - lift * 0.24)],
-      [sinA * this.capHalf * 0.16, this.capRy * (0.45 + lift * 0.2), 1.08 - lift * 0.16, 1.12 + lift * 0.15, 0.88 * (1 - lift * 0.44)],
-    ]) {
-      ctx.save();
-      const sw = this.capHalf * wMul;
-      const sh = this.capRy * hMul;
-      ctx.translate(shadowBaseX + xOff, baseBotY + yOff);
-      ctx.scale(1, sh / sw);
-      const sg = ctx.createRadialGradient(0, 0, sw * 0.15, 0, 0, sw);
-      sg.addColorStop(0, this.isLight ? `rgba(20, 46, 74, ${0.28 * alpha})` : `rgba(0, 0, 0, ${0.72 * alpha})`);
-      sg.addColorStop(0.65, this.isLight ? `rgba(38, 142, 182, ${0.1 * alpha})` : `rgba(42, 168, 212, ${0.12 * alpha})`);
-      sg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = sg;
-      ctx.beginPath();
-      ctx.arc(0, 0, sw, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    drawStudioSurface(ctx, W, H, baseBotY - this.capRy * 0.65, this.cx, this.capHalf, this.isLight);
+    const shadowBaseX = this.cx + this.clockX + sinA * this.capHalf * 0.3;
+    drawStudioShadow(
+      ctx,
+      shadowBaseX,
+      baseBotY + this.capRy * (0.14 + lift * 0.22),
+      this.capHalf * (1.04 + lift * 0.14),
+      this.capRy * (1.18 + lift * 0.2),
+      this.isLight,
+      Math.max(0.45, 1 - lift * 0.38),
+    );
 
     const surfTop = this.upperSurfaceY(1 - f.fraction);
     const surfBot = this.lowerSurfaceY(f.fraction);
@@ -1960,14 +1926,14 @@ export class ClepsydraView {
       const rpY = surfBot + (rp.x - this.cx) * tanBot;
       ctx.strokeStyle = this.isLight
         ? `rgba(255, 255, 255, ${rp.alpha * 0.85})`
-        : `rgba(218, 248, 255, ${rp.alpha * 0.9})`;
+        : `rgba(242, 246, 250, ${rp.alpha * 0.78})`;
       ctx.lineWidth = Math.max(1, 1.3 * this.dpr);
       ctx.beginPath();
       ctx.ellipse(rp.x, rpY, rp.rx, rp.rx * 0.21, botSlosh, 0, Math.PI * 2);
       ctx.stroke();
 
       if (rp.rx > 10 * this.dpr) {
-        ctx.strokeStyle = `rgba(12, 56, 94, ${rp.alpha * 0.32})`;
+        ctx.strokeStyle = `rgba(10, 12, 14, ${rp.alpha * 0.34})`;
         ctx.lineWidth = Math.max(0.8, 1 * this.dpr);
         ctx.beginPath();
         ctx.ellipse(rp.x, rpY + 0.8 * this.dpr, rp.rx * 0.72, rp.rx * 0.15, botSlosh, 0, Math.PI * 2);

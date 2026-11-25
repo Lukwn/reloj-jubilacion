@@ -22,29 +22,29 @@ export function grainColors(set: GrainSet, seed: number, isWorkday?: (day: numbe
     const j1 = (r & 0xff) / 255 - 0.5;
     const j2 = ((r >>> 8) & 0xff) / 255 - 0.5;
     const j3 = ((r >>> 16) & 0xff) / 255 - 0.5;
-    let h = 38 + j1 * 8;
-    let s = 0.55 + j2 * 0.16;
-    let l = 0.64 + j3 * 0.16;
+    let h = 35 + j1 * 6;
+    let s = 0.34 + j2 * 0.12;
+    let l = 0.60 + j3 * 0.14;
     // En días, los tonos de la semana son sutiles, del orden de la variación al azar de cada grano:
     // se repiten cada siete granos y, como se colocan seguidos, más contraste dibujaría arcos
     // (moiré) en la arena.
     const wd = set.unit === 'dias' ? weekday(set.days[id]) : -1;
     if (wd === 1) {
-      h -= 4;
-      l -= 0.025;
+      h -= 3;
+      l -= 0.02;
     } else if (wd === 5) {
-      h += 3;
-      s += 0.05;
+      h += 2;
+      s += 0.03;
       l += 0.015;
     } else if (set.extra?.[id]) {
-      // Las pagas extra sí destacan: son pocas y no siguen un ritmo fijo entre las canicas.
-      h += 6;
-      s += 0.27;
-      l += 0.04;
+      // Las pagas extra destacan con un matiz champán mineral sobrio.
+      h += 4;
+      s += 0.1;
+      l += 0.05;
     }
     if (wd >= 0 && isWorkday && !isWorkday(set.days[id])) {
       s -= 0.04;
-      l += 0.02;
+      l += 0.025;
     }
     const [R, G, B] = hslToRgb(h, s, l);
     out[id] = ((255 << 24) | (B << 16) | (G << 8) | R) >>> 0;
@@ -63,16 +63,16 @@ export function unpackColor(c: number): string {
   return `rgb(${c & 0xff},${(c >>> 8) & 0xff},${(c >>> 16) & 0xff})`;
 }
 
-/** Tonos de arena de colores (h, s, l) para las capas por años. Dos años seguidos nunca se repiten. */
+/** Tonos minerales desaturados (h, s, l) para las capas por años. Dos años seguidos nunca se repiten. */
 export const LAYER_TONES: ReadonlyArray<[number, number, number]> = [
-  [38, 0.58, 0.64], // ocre
-  [14, 0.55, 0.58], // terracota
-  [95, 0.24, 0.58], // salvia
-  [182, 0.3, 0.52], // turquesa apagado
-  [45, 0.42, 0.8], // crema
-  [215, 0.34, 0.62], // azul polvo
-  [350, 0.42, 0.68], // rosa palo
-  [300, 0.2, 0.56], // ciruela
+  [36, 0.36, 0.58], // ocre arena
+  [16, 0.34, 0.52], // terracota seca
+  [98, 0.18, 0.52], // salvia mineral
+  [188, 0.2, 0.48], // pizarra verdosa
+  [40, 0.24, 0.72], // caliza
+  [214, 0.2, 0.54], // acero gris
+  [352, 0.24, 0.58], // arcilla rosa
+  [290, 0.14, 0.52], // ciruela humo
 ];
 
 export interface YearLayers {

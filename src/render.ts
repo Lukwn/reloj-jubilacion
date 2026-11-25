@@ -1,6 +1,7 @@
 import { profileHalf, type Hourglass } from './hourglass';
 import { hash32 } from './phrases';
 import type { GrainSim } from './sim';
+import { agedBrassGradient, drawStudioShadow, drawStudioSurface, gunmetalGradient, studioPalette } from './studio';
 
 export interface Point {
   x: number; // coordenadas de rejilla (celdas, admite decimales)
@@ -705,93 +706,47 @@ export class Renderer {
     return { cx, glassHalf, capH, capHalf, pillarX, capRy, top: this.oy, bottom: this.oy + hg.H * s };
   }
 
-  /** Iluminación ambiental de estudio y sombra multicapa sobre la mesa. */
+  /** Plano de estudio común y sombra de contacto direccional coherente bajo la peana 3D. */
   private drawSurroundings(): void {
     const { ctx, theme } = this;
     const f = this.frame();
-    const h = f.bottom - f.top;
-    const midY = (f.top + f.bottom) / 2;
-    const rad = Math.max(h, f.capHalf * 2) * 0.85;
-
-    // Halo frío de estudio arriba-izquierda + núcleo cálido dorado tras la arena.
-    const cool = ctx.createRadialGradient(f.cx - f.capHalf * 0.5, f.top + h * 0.22, 0, f.cx, midY, rad);
-    cool.addColorStop(0, theme.ambientCool);
-    cool.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = cool;
-    ctx.fillRect(f.cx - rad, midY - rad, rad * 2, rad * 2);
-
-    const amb = ctx.createRadialGradient(f.cx, midY + h * 0.05, 0, f.cx, midY, rad * 0.82);
-    amb.addColorStop(0, theme.ambient);
-    amb.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = amb;
-    ctx.fillRect(f.cx - rad, midY - rad, rad * 2, rad * 2);
-
-    // Sombras proyectadas (difusa + contacto nítido bajo la peana circular 3D).
     const baseBottomY = f.bottom + f.capH * 0.78;
-    for (const [yOff, wMul, hMul, alpha] of [
-      [f.capRy * 0.9, 1.38, 1.9, 0.68],
-      [f.capRy * 0.45, 1.08, 1.12, 0.88],
-    ]) {
-      const sy = baseBottomY + yOff;
-      const sw = f.capHalf * wMul;
-      const sh = f.capRy * hMul;
-      ctx.save();
-      ctx.translate(f.cx, sy);
-      ctx.scale(1, sh / sw);
-      const shadow = ctx.createRadialGradient(0, 0, sw * 0.15, 0, 0, sw);
-      shadow.addColorStop(0, theme.shadow);
-      shadow.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = shadow;
-      ctx.beginPath();
-      ctx.arc(0, 0, sw, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    const horizonY = baseBottomY - f.capRy * 0.65;
 
-    // Reflejo cálido sutil de la base sobre el escritorio oscuro.
-    const refGrad = ctx.createLinearGradient(0, baseBottomY, 0, baseBottomY + f.capH * 1.6);
-    refGrad.addColorStop(0, theme.ambient);
-    refGrad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.save();
-    ctx.globalAlpha = 0.42;
-    ctx.fillStyle = refGrad;
-    ctx.beginPath();
-    ctx.ellipse(f.cx, baseBottomY + f.capRy * 1.15, f.capHalf * 0.96, f.capRy * 1.35, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    drawStudioSurface(ctx, this.canvas.width, this.canvas.height, horizonY, f.cx, f.capHalf, theme.isLight);
+    drawStudioShadow(ctx, f.cx, baseBottomY + f.capRy * 0.14, f.capHalf * 1.04, f.capRy * 1.18, theme.isLight, 1);
   }
 
   /** Mitad trasera de la base y la corona (donde asienta el vidrio en profundidad 3D). */
   private drawPedestalBack(): void {
     const { ctx, theme } = this;
     const f = this.frame();
-    const isLight = theme.isLight;
+    const pal = studioPalette(theme.isLight);
 
     // Cara superior trasera de la base inferior (se ve a través del cristal vacío de abajo).
     const botTopY = f.bottom + f.capH * 0.08;
     ctx.save();
     const discGrad = ctx.createLinearGradient(f.cx - f.capHalf, botTopY, f.cx + f.capHalf, botTopY);
-    if (isLight) {
-      discGrad.addColorStop(0, '#c2cad8');
-      discGrad.addColorStop(0.32, '#edf1f7');
-      discGrad.addColorStop(0.68, '#d4dce8');
-      discGrad.addColorStop(1, '#aeb8ca');
+    if (pal.isLight) {
+      discGrad.addColorStop(0, '#babdc3');
+      discGrad.addColorStop(0.28, '#e8eaee');
+      discGrad.addColorStop(0.68, '#cfd2d8');
+      discGrad.addColorStop(1, '#a3a7ae');
     } else {
-      discGrad.addColorStop(0, '#141b29');
-      discGrad.addColorStop(0.28, '#2b374e');
-      discGrad.addColorStop(0.62, '#1e273a');
-      discGrad.addColorStop(1, '#101622');
+      discGrad.addColorStop(0, '#131417');
+      discGrad.addColorStop(0.26, '#2b2e34');
+      discGrad.addColorStop(0.62, '#1d1f24');
+      discGrad.addColorStop(1, '#0e0f12');
     }
     ctx.fillStyle = discGrad;
     ctx.beginPath();
     ctx.ellipse(f.cx, botTopY, f.capHalf, f.capRy, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Rebaje circular interior (alojamiento de terciopelo/metal oscuro para el vidrio).
+    // Rebaje circular interior (asiento mecanizado oscuro para el vidrio).
     const seatRx = this.glassHalf(this.hg.H) * this.s * 1.03;
     const seatRy = f.capRy * 0.62;
-    ctx.fillStyle = isLight ? 'rgba(40, 54, 78, 0.16)' : 'rgba(4, 7, 14, 0.65)';
+    ctx.fillStyle = pal.isLight ? 'rgba(30, 32, 36, 0.16)' : 'rgba(4, 5, 6, 0.72)';
     ctx.beginPath();
     ctx.ellipse(f.cx, botTopY + f.capRy * 0.04, seatRx, seatRy, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -806,17 +761,17 @@ export class Renderer {
     const y0 = f.top - f.capH * 0.1;
     const y1 = f.bottom + f.capH * 0.08;
     ctx.save();
-    ctx.globalAlpha = theme.isLight ? 0.16 : 0.14;
+    ctx.globalAlpha = theme.isLight ? 0.14 : 0.14;
     const g = ctx.createLinearGradient(f.cx - rw, 0, f.cx + rw, 0);
-    g.addColorStop(0, '#101622');
-    g.addColorStop(0.4, '#8fa2c0');
-    g.addColorStop(1, '#101622');
+    g.addColorStop(0, '#111214');
+    g.addColorStop(0.36, '#8a8d94');
+    g.addColorStop(1, '#111214');
     ctx.fillStyle = g;
     ctx.fillRect(f.cx - rw, y0, rw * 2, y1 - y0);
     ctx.restore();
   }
 
-  /** Fondo interior del vidrio: gradiente Fresnel suave + sombreado en los encajes. */
+  /** Fondo interior del vidrio: gradiente Fresnel neutro + sombreado en los encajes. */
   private drawGlassBack(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
@@ -825,55 +780,47 @@ export class Renderer {
     ctx.clip(this.glassOuter);
 
     const g = ctx.createLinearGradient(f.cx - f.glassHalf, 0, f.cx + f.glassHalf, 0);
-    g.addColorStop(0, theme.isLight ? 'rgba(24, 42, 68, 0.16)' : 'rgba(180, 218, 255, 0.14)');
-    g.addColorStop(0.14, 'rgba(255,255,255,0.02)');
+    g.addColorStop(0, theme.isLight ? 'rgba(36, 40, 46, 0.14)' : 'rgba(225, 228, 234, 0.11)');
+    g.addColorStop(0.14, 'rgba(255,255,255,0.015)');
     g.addColorStop(0.5, 'rgba(255,255,255,0)');
-    g.addColorStop(0.86, 'rgba(255,255,255,0.02)');
-    g.addColorStop(1, theme.isLight ? 'rgba(24, 42, 68, 0.18)' : 'rgba(180, 218, 255, 0.12)');
+    g.addColorStop(0.86, 'rgba(255,255,255,0.015)');
+    g.addColorStop(1, theme.isLight ? 'rgba(36, 40, 46, 0.16)' : 'rgba(218, 214, 206, 0.09)');
     ctx.fillStyle = g;
     ctx.fillRect(f.cx - f.glassHalf, f.top, f.glassHalf * 2, h);
 
     // Sombra curva donde el vidrio entra en la corona superior y la base inferior.
     const seatH = Math.min(26 * dpr, h * 0.08);
     const topSeat = ctx.createLinearGradient(0, f.top, 0, f.top + seatH);
-    topSeat.addColorStop(0, theme.isLight ? 'rgba(20,34,54,0.18)' : 'rgba(0,0,0,0.34)');
+    topSeat.addColorStop(0, theme.isLight ? 'rgba(24,26,30,0.18)' : 'rgba(0,0,0,0.38)');
     topSeat.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = topSeat;
     ctx.fillRect(f.cx - f.glassHalf, f.top, f.glassHalf * 2, seatH);
 
     const botSeat = ctx.createLinearGradient(0, f.bottom - seatH, 0, f.bottom);
     botSeat.addColorStop(0, 'rgba(0,0,0,0)');
-    botSeat.addColorStop(1, theme.isLight ? 'rgba(20,34,54,0.16)' : 'rgba(0,0,0,0.28)');
+    botSeat.addColorStop(1, theme.isLight ? 'rgba(24,26,30,0.16)' : 'rgba(0,0,0,0.32)');
     ctx.fillStyle = botSeat;
     ctx.fillRect(f.cx - f.glassHalf, f.bottom - seatH, f.glassHalf * 2, seatH);
     ctx.restore();
   }
 
   /**
-   * Frente del vidrio: pared real con doble borde refractivo (oscuro-brillante-oscuro),
-   * reflejos curvos de softbox y garganta de vidrio soplado en 3D.
+   * Frente del vidrio: pared real con doble borde refractivo neutro,
+   * reflejos curvos de softbox (arriba-izquierda) y garganta de vidrio soplado en 3D.
    */
   private drawGlassFront(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
-    const isLight = theme.isLight;
+    const pal = studioPalette(theme.isLight);
 
-    // 1. Banda sólida de la pared de vidrio (reflexión interna total en cristal borosilicato).
+    // 1. Banda sólida de la pared de vidrio borosilicato neutro.
     ctx.save();
     const wallGrad = ctx.createLinearGradient(f.cx - f.glassHalf, 0, f.cx + f.glassHalf, 0);
-    if (isLight) {
-      wallGrad.addColorStop(0, 'rgba(28, 46, 74, 0.28)');
-      wallGrad.addColorStop(0.18, 'rgba(255, 255, 255, 0.72)');
-      wallGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.25)');
-      wallGrad.addColorStop(0.82, 'rgba(255, 255, 255, 0.65)');
-      wallGrad.addColorStop(1, 'rgba(28, 46, 74, 0.3)');
-    } else {
-      wallGrad.addColorStop(0, 'rgba(180, 220, 255, 0.26)');
-      wallGrad.addColorStop(0.18, 'rgba(235, 246, 255, 0.14)');
-      wallGrad.addColorStop(0.5, 'rgba(180, 215, 255, 0.08)');
-      wallGrad.addColorStop(0.82, 'rgba(255, 232, 182, 0.14)');
-      wallGrad.addColorStop(1, 'rgba(180, 220, 255, 0.24)');
-    }
+    wallGrad.addColorStop(0, pal.glassWallLeft);
+    wallGrad.addColorStop(0.18, pal.isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(240, 242, 245, 0.13)');
+    wallGrad.addColorStop(0.5, pal.glassWallMid);
+    wallGrad.addColorStop(0.82, pal.isLight ? 'rgba(255, 255, 255, 0.6)' : 'rgba(222, 214, 198, 0.1)');
+    wallGrad.addColorStop(1, pal.glassWallRight);
     ctx.fillStyle = wallGrad;
     ctx.fill(this.glassWallBand, 'evenodd');
     ctx.restore();
@@ -885,21 +832,17 @@ export class Renderer {
     ctx.lineJoin = 'round';
 
     for (const { path, width, y0, y1, alpha, warm } of this.shine) {
-      const col = warm
-        ? isLight
-          ? 'rgba(245, 218, 155, 0.5)'
-          : 'rgba(255, 228, 170, 0.32)'
-        : theme.glassShine;
+      const col = warm ? pal.glassRimWarm : pal.glassShine;
       const g = ctx.createLinearGradient(0, y0, 0, y1);
       g.addColorStop(0, 'rgba(255,255,255,0)');
       g.addColorStop(0.2, col);
       g.addColorStop(0.8, col);
       g.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.strokeStyle = g;
-      ctx.globalAlpha = 0.36 * alpha;
+      ctx.globalAlpha = 0.34 * alpha;
       ctx.lineWidth = width;
       ctx.stroke(path);
-      ctx.globalAlpha = 0.72 * alpha;
+      ctx.globalAlpha = 0.68 * alpha;
       ctx.lineWidth = Math.max(1.1 * dpr, width * 0.2);
       ctx.stroke(path);
     }
@@ -908,20 +851,20 @@ export class Renderer {
     this.drawWaistOptical();
     ctx.restore();
 
-    // 3. Línea interior sutil (cara interna del vidrio) y borde exterior especular nítido.
-    const rim = Math.max(1.0 * dpr, Math.min(2.1 * dpr, f.glassHalf * 0.012));
+    // 3. Línea interior sutil (cara interna del vidrio) y borde exterior especular neutro.
+    const rim = Math.max(1.0 * dpr, Math.min(2.0 * dpr, f.glassHalf * 0.012));
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(0.8, rim * 0.7);
-    ctx.strokeStyle = isLight ? 'rgba(20, 36, 58, 0.14)' : 'rgba(6, 12, 22, 0.45)';
+    ctx.strokeStyle = pal.glassInnerEdge;
     ctx.stroke(this.glassInner);
 
     const edgeGrad = ctx.createLinearGradient(f.cx - f.glassHalf, f.top, f.cx + f.glassHalf, f.bottom);
-    edgeGrad.addColorStop(0, theme.glassShine);
-    edgeGrad.addColorStop(0.25, theme.glassEdge);
-    edgeGrad.addColorStop(0.5, theme.glassShine);
-    edgeGrad.addColorStop(0.78, theme.glassEdge);
-    edgeGrad.addColorStop(1, theme.glassShine);
+    edgeGrad.addColorStop(0, pal.glassShine);
+    edgeGrad.addColorStop(0.28, pal.glassOuterEdge);
+    edgeGrad.addColorStop(0.55, pal.glassShine);
+    edgeGrad.addColorStop(0.82, pal.glassOuterEdge);
+    edgeGrad.addColorStop(1, pal.glassRimWarm);
     ctx.lineWidth = rim;
     ctx.strokeStyle = edgeGrad;
     ctx.stroke(this.glassOuter);
@@ -979,11 +922,11 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Dos columnas cilíndricas laterales de titanio cepillado con casquillos en oro champán. */
+  /** Dos columnas cilíndricas laterales de acero pavonado neutro con casquillos de latón envejecido. */
   private drawSidePillars(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
-    const isLight = theme.isLight;
+    const pal = studioPalette(theme.isLight);
     const pw = Math.max(2.6 * dpr, Math.min(5.2 * dpr, f.glassHalf * 0.036));
     const yTop = f.top - f.capH * 0.05;
     const yBot = f.bottom + f.capH * 0.1;
@@ -991,35 +934,14 @@ export class Renderer {
     for (const side of [-1, 1]) {
       const px = f.cx + side * f.pillarX;
 
-      // Cuerpo cilíndrico metálico con gradiente especular horizontal.
-      const g = ctx.createLinearGradient(px - pw, 0, px + pw, 0);
-      if (isLight) {
-        g.addColorStop(0, '#8d98ab');
-        g.addColorStop(0.32, '#f5f8fc');
-        g.addColorStop(0.55, '#bcc6d6');
-        g.addColorStop(0.82, '#e2e8f2');
-        g.addColorStop(1, '#7d889c');
-      } else {
-        g.addColorStop(0, '#0e1320');
-        g.addColorStop(0.3, '#526382');
-        g.addColorStop(0.52, '#222d42');
-        g.addColorStop(0.8, '#3f4f6d');
-        g.addColorStop(1, '#0b101b');
-      }
-      ctx.fillStyle = g;
+      ctx.fillStyle = gunmetalGradient(ctx, px - pw, px + pw, pal);
       ctx.fillRect(px - pw, yTop, pw * 2, yBot - yTop);
 
-      // Casquillos torneados con anillo fino en oro champán arriba y abajo.
+      // Casquillos torneados en latón envejecido arriba y abajo.
       const fw = pw * 1.48;
       const fh = Math.max(4.5 * dpr, f.capH * 0.22);
       for (const fy of [f.top + f.capRy * 0.68, yBot - fh]) {
-        const fg = ctx.createLinearGradient(px - fw, 0, px + fw, 0);
-        fg.addColorStop(0, '#6b4e1e');
-        fg.addColorStop(0.3, '#f3d58d');
-        fg.addColorStop(0.58, '#b88b3d');
-        fg.addColorStop(0.84, '#e5c172');
-        fg.addColorStop(1, '#583f16');
-        ctx.fillStyle = fg;
+        ctx.fillStyle = agedBrassGradient(ctx, px - fw, px + fw, pal);
         ctx.beginPath();
         ctx.roundRect(px - fw, fy, fw * 2, fh, fh * 0.35);
         ctx.fill();
@@ -1027,11 +949,11 @@ export class Renderer {
     }
   }
 
-  /** Pedestales cilíndricos 3D torneados (corona superior y base inferior con bisel en oro champán). */
+  /** Pedestales cilíndricos 3D torneados en acero pavonado con bisel de latón envejecido. */
   private drawPedestalsFront(): void {
     const { ctx, theme, dpr } = this;
     const f = this.frame();
-    const isLight = theme.isLight;
+    const pal = studioPalette(theme.isLight);
     const thick = Math.max(9 * dpr, f.capH * 0.58);
 
     const drawCylinderCap = (faceY: number, isTop: boolean) => {
@@ -1041,39 +963,16 @@ export class Renderer {
 
       ctx.save();
       // 1. Pared lateral cilíndrica del pedestal con reflejo metálico torneado.
-      const wallGrad = ctx.createLinearGradient(f.cx - rx, 0, f.cx + rx, 0);
-      if (isLight) {
-        wallGrad.addColorStop(0, '#96a1b5');
-        wallGrad.addColorStop(0.22, '#eef2f8');
-        wallGrad.addColorStop(0.45, '#c6cfde');
-        wallGrad.addColorStop(0.72, '#9faac0');
-        wallGrad.addColorStop(0.88, '#e3e9f3');
-        wallGrad.addColorStop(1, '#8490a6');
-      } else {
-        wallGrad.addColorStop(0, '#0d121e');
-        wallGrad.addColorStop(0.2, '#3d4c68');
-        wallGrad.addColorStop(0.34, '#56698a');
-        wallGrad.addColorStop(0.56, '#1f293d');
-        wallGrad.addColorStop(0.78, '#141b2a');
-        wallGrad.addColorStop(0.9, '#394863');
-        wallGrad.addColorStop(1, '#0b101b');
-      }
       ctx.beginPath();
       ctx.ellipse(f.cx, botFaceY, rx, ry, 0, 0, Math.PI);
       ctx.lineTo(f.cx - rx, faceY);
       ctx.ellipse(f.cx, faceY, rx, ry, 0, Math.PI, 0, true);
       ctx.closePath();
-      ctx.fillStyle = wallGrad;
+      ctx.fillStyle = gunmetalGradient(ctx, f.cx - rx, f.cx + rx, pal);
       ctx.fill();
 
-      // 2. Filete biselado fino en oro champán en el canto del pedestal.
-      const goldGrad = ctx.createLinearGradient(f.cx - rx, 0, f.cx + rx, 0);
-      goldGrad.addColorStop(0, 'rgba(120, 86, 30, 0.55)');
-      goldGrad.addColorStop(0.26, 'rgba(252, 224, 152, 0.92)');
-      goldGrad.addColorStop(0.55, 'rgba(186, 138, 56, 0.72)');
-      goldGrad.addColorStop(0.84, 'rgba(246, 212, 132, 0.85)');
-      goldGrad.addColorStop(1, 'rgba(110, 78, 26, 0.55)');
-      ctx.strokeStyle = goldGrad;
+      // 2. Filete biselado fino en latón envejecido en el canto del pedestal.
+      ctx.strokeStyle = agedBrassGradient(ctx, f.cx - rx, f.cx + rx, pal, 0.88);
       ctx.lineWidth = Math.max(1.2, 1.45 * dpr);
       ctx.beginPath();
       ctx.ellipse(f.cx, isTop ? botFaceY - 1.2 * dpr : faceY + 1.2 * dpr, rx * 0.995, ry * 0.98, 0, 0.04, Math.PI - 0.04);
@@ -1082,14 +981,14 @@ export class Renderer {
       // 3. Cara superior elíptica 3D de la corona (arriba) o labio delantero de la base (abajo).
       if (isTop) {
         const topGrad = ctx.createLinearGradient(f.cx - rx, faceY - ry, f.cx + rx, faceY + ry);
-        if (isLight) {
-          topGrad.addColorStop(0, '#f7f9fc');
-          topGrad.addColorStop(0.5, '#d5dde9');
-          topGrad.addColorStop(1, '#b8c2d4');
+        if (pal.isLight) {
+          topGrad.addColorStop(0, '#f4f5f7');
+          topGrad.addColorStop(0.5, '#d5d7dc');
+          topGrad.addColorStop(1, '#b6b9c0');
         } else {
-          topGrad.addColorStop(0, '#364561');
-          topGrad.addColorStop(0.42, '#222c40');
-          topGrad.addColorStop(1, '#121826');
+          topGrad.addColorStop(0, '#33363c');
+          topGrad.addColorStop(0.42, '#202226');
+          topGrad.addColorStop(1, '#111215');
         }
         ctx.fillStyle = topGrad;
         ctx.beginPath();
@@ -1097,14 +996,14 @@ export class Renderer {
         ctx.fill();
 
         // Rebaje concéntrico sutil en la cara superior de la corona.
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.7)' : 'rgba(220, 238, 255, 0.16)';
+        ctx.strokeStyle = pal.isLight ? 'rgba(255, 255, 255, 0.65)' : 'rgba(235, 237, 240, 0.13)';
         ctx.lineWidth = Math.max(0.9, 1 * dpr);
         ctx.beginPath();
         ctx.ellipse(f.cx, faceY, rx * 0.84, ry * 0.82, 0, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        // Borde frontal brillante de la base sobre el que apoya el vidrio.
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(225, 240, 255, 0.24)';
+        // Borde frontal sutil de la base sobre el que apoya el vidrio.
+        ctx.strokeStyle = pal.isLight ? 'rgba(255, 255, 255, 0.68)' : 'rgba(235, 237, 240, 0.18)';
         ctx.lineWidth = Math.max(1, 1.15 * dpr);
         ctx.beginPath();
         ctx.ellipse(f.cx, faceY, rx * 0.99, ry * 0.98, 0, 0.06, Math.PI - 0.06);
@@ -1112,7 +1011,7 @@ export class Renderer {
       }
 
       // Contorno sutil del canto inferior para separar de la sombra.
-      ctx.strokeStyle = isLight ? 'rgba(25, 38, 60, 0.22)' : 'rgba(0, 0, 0, 0.52)';
+      ctx.strokeStyle = pal.isLight ? 'rgba(20, 22, 26, 0.22)' : 'rgba(0, 0, 0, 0.58)';
       ctx.lineWidth = Math.max(1, 1.1 * dpr);
       ctx.beginPath();
       ctx.ellipse(f.cx, botFaceY, rx, ry, 0, 0.02, Math.PI - 0.02);
@@ -1131,9 +1030,9 @@ export class Renderer {
     const y = this.oy + p.y * s;
     const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
     g.addColorStop(0, this.theme.glow);
-    g.addColorStop(1, 'rgba(255, 224, 150, 0)');
+    g.addColorStop(1, 'rgba(196, 173, 130, 0)');
     ctx.save();
-    ctx.globalAlpha = intensity;
+    ctx.globalAlpha = intensity * 0.55;
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);

@@ -1,4 +1,5 @@
 import { hash32 } from './phrases';
+import { drawStudioShadow, drawStudioSurface } from './studio';
 import { groupOfGrain, type GrainSet } from './units';
 
 export interface AltFrame {
@@ -24,27 +25,30 @@ interface StackSpec {
 }
 
 /**
- * Racimo orgánico de 13 pilas en 3 planos de profundidad:
- * 3 torres altas lado a lado al fondo, pilas medias a los lados y cortas en primer plano.
+ * Racimo orgánico de 16 pilas escalonadas en 4 planos de profundidad:
+ * alturas más equilibradas para que cada moneda tenga grosor real y macizo sin salirse de pantalla.
  */
 const CLUSTER: ReadonlyArray<StackSpec> = [
-  // Fondo (3 torres altas lado a lado)
-  { nx: -0.54, ny: 0.08, relH: 1.14, fillOrder: 1 },
-  { nx: 0.0, ny: 0.02, relH: 1.38, fillOrder: 0 },
-  { nx: 0.54, ny: 0.06, relH: 1.24, fillOrder: 2 },
-  // Plano medio-fondo (hombros laterales)
-  { nx: -0.92, ny: 0.34, relH: 0.72, fillOrder: 4 },
-  { nx: -0.44, ny: 0.42, relH: 0.86, fillOrder: 3 },
-  { nx: 0.46, ny: 0.4, relH: 0.84, fillOrder: 5 },
-  { nx: 0.92, ny: 0.34, relH: 0.68, fillOrder: 6 },
+  // Fondo (torres altas al fondo)
+  { nx: -0.52, ny: 0.06, relH: 1.02, fillOrder: 1 },
+  { nx: 0.0, ny: 0.02, relH: 1.1, fillOrder: 0 },
+  { nx: 0.52, ny: 0.05, relH: 0.98, fillOrder: 2 },
+  // Plano medio-fondo
+  { nx: -0.92, ny: 0.28, relH: 0.78, fillOrder: 5 },
+  { nx: -0.34, ny: 0.34, relH: 0.88, fillOrder: 3 },
+  { nx: 0.34, ny: 0.32, relH: 0.86, fillOrder: 4 },
+  { nx: 0.92, ny: 0.28, relH: 0.76, fillOrder: 6 },
   // Plano medio-delantero
-  { nx: -0.22, ny: 0.64, relH: 0.56, fillOrder: 7 },
-  { nx: 0.24, ny: 0.62, relH: 0.6, fillOrder: 8 },
-  { nx: 0.72, ny: 0.66, relH: 0.52, fillOrder: 9 },
+  { nx: -0.74, ny: 0.58, relH: 0.68, fillOrder: 8 },
+  { nx: -0.18, ny: 0.6, relH: 0.74, fillOrder: 7 },
+  { nx: 0.3, ny: 0.58, relH: 0.72, fillOrder: 9 },
+  { nx: 0.78, ny: 0.6, relH: 0.64, fillOrder: 10 },
   // Primer plano (pilas cortas escalonadas)
-  { nx: -0.66, ny: 0.84, relH: 0.46, fillOrder: 10 },
-  { nx: -0.14, ny: 0.96, relH: 0.32, fillOrder: 11 },
-  { nx: 0.38, ny: 0.88, relH: 0.42, fillOrder: 12 },
+  { nx: -0.94, ny: 0.84, relH: 0.5, fillOrder: 14 },
+  { nx: -0.5, ny: 0.88, relH: 0.58, fillOrder: 11 },
+  { nx: -0.04, ny: 0.96, relH: 0.52, fillOrder: 12 },
+  { nx: 0.44, ny: 0.9, relH: 0.56, fillOrder: 13 },
+  { nx: 0.88, ny: 0.86, relH: 0.48, fillOrder: 15 },
 ];
 
 interface MetalPalette {
@@ -58,38 +62,40 @@ interface MetalPalette {
   groove: string;
 }
 
+/** Latón envejecido cepillado (coherente con el metal de los relojes, sin dorado chillón). */
 const GOLD_PALETTE: MetalPalette = {
-  rimDark: '#4f2c05',
-  rimMid: '#c6871b',
-  rimBright: '#f5cb5c',
-  rimSpec: '#fff6be',
-  faceLight: '#fff3a8',
-  faceMid: '#e8ae32',
-  faceDark: '#9e620c',
-  groove: 'rgba(65, 34, 4, 0.34)',
+  rimDark: '#2c2316',
+  rimMid: '#6e5a3b',
+  rimBright: '#a2885c',
+  rimSpec: '#d8c7a3',
+  faceLight: '#cebc96',
+  faceMid: '#947c51',
+  faceDark: '#4d3e26',
+  groove: 'rgba(24, 18, 10, 0.44)',
 };
 
+/** Pagas extra: latón claro / champán cepillado sobrio. */
 const EXTRA_PALETTE: MetalPalette = {
-  rimDark: '#6b4208',
-  rimMid: '#e3a82d',
-  rimBright: '#ffe37a',
-  rimSpec: '#ffffff',
-  faceLight: '#fffbe0',
-  faceMid: '#ffd257',
-  faceDark: '#bf7e14',
-  groove: 'rgba(92, 52, 6, 0.28)',
+  rimDark: '#3d3323',
+  rimMid: '#8a754f',
+  rimBright: '#bfa97e',
+  rimSpec: '#e9dfc7',
+  faceLight: '#e1d5b9',
+  faceMid: '#b19a6e',
+  faceDark: '#665536',
+  groove: 'rgba(34, 26, 14, 0.36)',
 };
 
-/** Paletas metálicas anodizadas para «Capas por años» (manteniendo brillo metálico real). */
+/** Aleaciones minerales desaturadas para «Capas por años». */
 const LAYER_METALS: ReadonlyArray<MetalPalette> = [
   GOLD_PALETTE,
-  { rimDark: '#592519', rimMid: '#c86a4b', rimBright: '#f2a485', rimSpec: '#ffe1d4', faceLight: '#ffd2bd', faceMid: '#db7a58', faceDark: '#8c3d25', groove: 'rgba(68,24,14,0.34)' },
-  { rimDark: '#234433', rimMid: '#4f9973', rimBright: '#8ad4ad', rimSpec: '#d4f7e4', faceLight: '#c2f0d6', faceMid: '#5eb086', faceDark: '#30664a', groove: 'rgba(18,48,32,0.34)' },
-  { rimDark: '#1c3952', rimMid: '#4a84b5', rimBright: '#89c0eb', rimSpec: '#d8eeff', faceLight: '#c7e5fc', faceMid: '#5b97c9', faceDark: '#295780', groove: 'rgba(16,38,60,0.34)' },
-  { rimDark: '#574a2c', rimMid: '#c4b17e', rimBright: '#ede0b9', rimSpec: '#fffbe8', faceLight: '#faf2d4', faceMid: '#d6c38d', faceDark: '#877548', groove: 'rgba(58,48,22,0.3)' },
-  { rimDark: '#363c4a', rimMid: '#8a94a8', rimBright: '#ccd5e6', rimSpec: '#ffffff', faceLight: '#edf2fa', faceMid: '#a5b0c4', faceDark: '#5a6375', groove: 'rgba(30,36,48,0.32)' },
-  { rimDark: '#54263b', rimMid: '#b55d82', rimBright: '#e899ba', rimSpec: '#ffdbe9', faceLight: '#f7c8dc', faceMid: '#c96f95', faceDark: '#7d3454', groove: 'rgba(62,20,38,0.34)' },
-  { rimDark: '#382a54', rimMid: '#7c64b0', rimBright: '#b5a0e3', rimSpec: '#e8dfff', faceLight: '#d9ccfa', faceMid: '#8e77c4', faceDark: '#4f3a7d', groove: 'rgba(36,24,62,0.34)' },
+  { rimDark: '#3d241c', rimMid: '#8a5644', rimBright: '#b57e6a', rimSpec: '#dec0b4', faceLight: '#cfa999', faceMid: '#99624f', faceDark: '#593326', groove: 'rgba(32,16,12,0.4)' },
+  { rimDark: '#1e3027', rimMid: '#486b58', rimBright: '#729984', rimSpec: '#b8d1c3', faceLight: '#a3c2b1', faceMid: '#567d68', faceDark: '#2d4739', groove: 'rgba(14,28,20,0.4)' },
+  { rimDark: '#1b2b38', rimMid: '#43627a', rimBright: '#6e8fa8', rimSpec: '#b6cad9', faceLight: '#9fb8cc', faceMid: '#51738c', faceDark: '#2b4354', groove: 'rgba(14,24,34,0.4)' },
+  { rimDark: '#3c3627', rimMid: '#857a5c', rimBright: '#b0a482', rimSpec: '#ded6bf', faceLight: '#cfc6ab', faceMid: '#968a6a', faceDark: '#574f39', groove: 'rgba(30,26,16,0.36)' },
+  { rimDark: '#262930', rimMid: '#5f6570', rimBright: '#8e95a3', rimSpec: '#cfd4de', faceLight: '#bcc2ce', faceMid: '#727885', faceDark: '#3e424a', groove: 'rgba(18,20,24,0.38)' },
+  { rimDark: '#3b242e', rimMid: '#825268', rimBright: '#ad7a91', rimSpec: '#dbc0cd', faceLight: '#cba6b7', faceMid: '#915f76', faceDark: '#543141', groove: 'rgba(32,16,24,0.4)' },
+  { rimDark: '#2b2438', rimMid: '#5f5278', rimBright: '#897aa6', rimSpec: '#c7bed9', faceLight: '#b3a7c9', faceMid: '#6d5e8a', faceDark: '#3e3452', groove: 'rgba(22,18,32,0.4)' },
 ];
 
 interface StackState {
@@ -217,7 +223,7 @@ export class CoinsView {
   /** Reparte las N nóminas en las pilas del racimo manteniendo la suma exacta = grains.total. */
   private assignStacks(): void {
     const n = this.grains.total;
-    const count = Math.min(CLUSTER.length, Math.max(5, Math.round(n / 42)));
+    const count = Math.min(CLUSTER.length, Math.max(6, Math.round(n / 34)));
     const chosen = [...CLUSTER]
       .sort((a, b) => a.fillOrder - b.fillOrder)
       .slice(0, count);
@@ -406,16 +412,16 @@ export class CoinsView {
       const marginX = this.rx + 8 * dpr;
       for (let id = 0; id < this.grains.total; id++) {
         if (this.mode[id] === MODE_STACKED) {
-          // Mantener si estaba cayendo por encima o ligeramente torcida.
-          const oldHomeX = this.homeX(id);
-          const oldHomeY = this.homeY(id);
-          if (id >= this.prevLanded) {
-            this.px[id] = oldHomeX;
-            this.py[id] = oldHomeY;
+          const hx = this.homeX(id);
+          const hy = this.homeY(id);
+          if (id >= this.prevLanded || (this.vy[id] === 0 && this.vx[id] === 0)) {
+            this.px[id] = hx;
+            this.py[id] = hy;
           } else {
             this.px[id] = Math.max(marginX, Math.min(W - marginX, this.px[id] * sx));
-            this.py[id] = Math.min(oldHomeY, this.py[id] * sy);
+            this.py[id] = Math.max(this.topLimitY, Math.min(hy, this.py[id] * sy));
           }
+          this.floorY[id] = this.stacks[this.geom[id].stackIdx].by;
         } else {
           this.px[id] = Math.max(marginX, Math.min(W - marginX, this.px[id] * sx));
           this.py[id] = Math.max(this.topLimitY, Math.min(this.tableBotY, this.py[id] * sy));
@@ -430,24 +436,46 @@ export class CoinsView {
   private computeLayout(cssW: number, cssH: number, dpr: number): void {
     const W = cssW * dpr;
     const H = cssH * dpr;
-    const top = (TOP_RESERVE + this.topExtra + 18) * dpr;
-    const bot = (BOTTOM_RESERVE + 18) * dpr;
-    const availW = Math.max(180 * dpr, (cssW - 28) * dpr);
-    const availH = Math.max(160 * dpr, H - top - bot);
+    const top = (TOP_RESERVE + this.topExtra + 16) * dpr;
+    const bot = (BOTTOM_RESERVE + 28) * dpr;
+    const sideMargin = Math.max(16 * dpr, W * 0.04);
+    const safeW = Math.max(140 * dpr, W - sideMargin * 2);
+    const safeH = Math.max(140 * dpr, H - top - bot);
 
     const maxStackCoins = Math.max(1, ...this.stacks.map((s) => s.ids.length));
-    const maxRxW = Math.min(availW * 0.135, 56 * dpr);
-    const rx = Math.max(16 * dpr, maxRxW);
-    const ry = rx * 0.31;
+    const maxAbsNx = Math.max(0.01, ...this.stacks.map((s) => Math.abs(s.spec.nx)));
 
-    const depthSpan = Math.min(availH * 0.2, ry * 5.2);
-    const maxTowerH = availH - depthSpan - ry * 2.4;
-    const thick = Math.max(2.2 * dpr, Math.min(rx * 0.155, maxTowerH / maxStackCoins));
+    // Calcular primero el grosor máximo que cabe verticalmente y acoplar el radio para lograr
+    // una proporción de moneda maciza y real (~15–18 % grosor/radio, como una moneda de 1 € / 2 €).
+    const baseRx = Math.max(16 * dpr, Math.min(safeW * 0.135, safeH * 0.145, 64 * dpr));
+    const prelimRy = baseRx * 0.32;
+    let depthSpan = Math.min(safeH * 0.17, prelimRy * 4.4);
+    const maxTowerH = Math.max(44 * dpr, safeH - depthSpan - prelimRy * 2.4);
+    let thick = Math.max(1.8 * dpr, Math.min(baseRx * 0.2, maxTowerH / maxStackCoins));
+
+    // Acoplar el radio al grosor real para que la moneda nunca se vea como una chapa fina.
+    const chunkyRx = thick / 0.155;
+    const rx = Math.max(16 * dpr, Math.min(baseRx, Math.max(26 * dpr, chunkyRx)));
+    const ry = rx * 0.32;
+    thick = Math.min(rx * 0.21, thick);
+
+    const maxTopNeed = (th: number, ds: number) =>
+      Math.max(...this.stacks.map((s) => s.ids.length * th - s.spec.ny * ds)) + ry * 1.15;
+    const maxBotNeed = (ds: number) =>
+      Math.max(...this.stacks.map((s) => s.spec.ny * ds)) + ry * 1.15;
+
+    // Verificación exacta de caja envolvente vertical para todas las pilas del racimo.
+    const totalNeed = maxTopNeed(thick, depthSpan) + maxBotNeed(depthSpan);
+    if (totalNeed > safeH) {
+      const k = Math.max(0.25, (safeH - ry * 2.3) / Math.max(1, totalNeed - ry * 2.3));
+      thick = Math.max(1.4 * dpr, thick * k);
+      depthSpan *= k;
+    }
 
     this.rx = rx;
     this.ry = ry;
     this.thick = thick;
-    this.topLimitY = top - ry;
+    this.topLimitY = top + ry * 0.6;
 
     const sizeKey = `${Math.round(rx)}x${Math.round(ry)}x${Math.round(thick * 10)}`;
     if (sizeKey !== this.spriteSizeKey) {
@@ -455,13 +483,21 @@ export class CoinsView {
       this.spriteSizeKey = sizeKey;
     }
 
+    // Separación horizontal estrictamente acotada dentro de [sideMargin, W - sideMargin].
+    const maxSpreadX = Math.max(0, (safeW * 0.5 - rx * 1.08) / maxAbsNx);
+    const spreadX = Math.min(maxSpreadX, rx * 2.75);
     const cx = W / 2;
-    const spreadX = Math.min(availW * 0.48 - rx, rx * 3.4);
-    const totalVisualH = maxStackCoins * thick + depthSpan + ry * 2;
-    const groundBackY = top + Math.max(0, (availH - totalVisualH) * 0.55) + maxStackCoins * thick + ry;
 
-    this.tableTopY = groundBackY - ry * 1.4;
-    this.tableBotY = Math.min(H - bot + ry * 0.3, groundBackY + depthSpan + ry * 2.2);
+    const topNeed = maxTopNeed(thick, depthSpan);
+    const botNeed = maxBotNeed(depthSpan);
+    const usedH = topNeed + botNeed;
+    const groundBackY = Math.min(
+      H - bot - botNeed,
+      Math.max(top + topNeed, top + (safeH - usedH) * 0.54 + topNeed),
+    );
+
+    this.tableTopY = groundBackY - ry * 1.2;
+    this.tableBotY = Math.min(H - bot - ry * 0.6, groundBackY + depthSpan + ry * 0.4);
 
     for (const st of this.stacks) {
       st.bx = cx + st.spec.nx * spreadX;
@@ -1139,29 +1175,48 @@ export class CoinsView {
     g.fillStyle = edgeGrad;
     g.fill();
 
-    // 2. Estrías verticales del canto con acortamiento en perspectiva (cos θ).
+    // 2. Estrías verticales del canto con relieve real (surco oscuro + micro-arista iluminada en perspectiva).
     g.save();
     g.clip();
-    g.strokeStyle = pal.groove;
-    g.lineWidth = Math.max(0.7, 0.85 * this.dpr);
-    const reeds = Math.max(18, Math.round(rx / (1.8 * this.dpr)));
+    const reeds = Math.max(20, Math.round(rx / (1.85 * this.dpr)));
+    const reedW = Math.max(0.75, 0.9 * this.dpr);
     for (let k = 1; k < reeds; k++) {
       const th = (k / reeds) * Math.PI;
       const gx = cx - Math.cos(th) * rx;
+      const sinTh = Math.sin(th);
+      g.strokeStyle = pal.groove;
+      g.lineWidth = reedW;
       g.beginPath();
       g.moveTo(gx, topY);
       g.lineTo(gx, botY + ry);
       g.stroke();
+
+      // Micro-brillo en el flanco iluminado de cada estría (arriba-izquierda).
+      if (sinTh > 0.25) {
+        g.strokeStyle = `rgba(235, 224, 198, ${(0.22 * sinTh).toFixed(2)})`;
+        g.lineWidth = Math.max(0.55, 0.65 * this.dpr);
+        g.beginPath();
+        g.moveTo(gx + reedW * 0.9, topY);
+        g.lineTo(gx + reedW * 0.9, botY + ry);
+        g.stroke();
+      }
     }
-    // Filo inferior oscuro para separar limpiamente monedas apiladas.
-    g.strokeStyle = 'rgba(28, 14, 2, 0.58)';
-    g.lineWidth = Math.max(1, 1.15 * this.dpr);
+    // Bisel inferior con oclusión marcada para dar peso y separación física entre monedas apiladas.
+    g.strokeStyle = 'rgba(14, 10, 4, 0.72)';
+    g.lineWidth = Math.max(1.2, 1.4 * this.dpr);
     g.beginPath();
-    g.ellipse(cx, botY, rx, ry, 0, 0.03, Math.PI - 0.03);
+    g.ellipse(cx, botY, rx, ry, 0, 0.02, Math.PI - 0.02);
+    g.stroke();
+
+    // Sombra sutil justo bajo el bisel superior del canto (efecto de arista biselada).
+    g.strokeStyle = 'rgba(20, 14, 6, 0.28)';
+    g.lineWidth = Math.max(0.85, 1.0 * this.dpr);
+    g.beginPath();
+    g.ellipse(cx, topY + thick * 0.16, rx, ry, 0, 0.04, Math.PI - 0.04);
     g.stroke();
     g.restore();
 
-    // 3. Cara superior sólida (siempre dibujada para que nunca parezcan huecas al moverse o caer).
+    // 3. Cara superior sólida con listel exterior grueso y campo rebajado acuñado.
     const bevelGrad = g.createLinearGradient(cx - rx, topY - ry, cx + rx, topY + ry);
     bevelGrad.addColorStop(0, pal.rimSpec);
     bevelGrad.addColorStop(0.32, pal.faceLight);
@@ -1173,8 +1228,8 @@ export class CoinsView {
     g.fill();
 
     // Cara interior rebajada con brillo metálico diagonal.
-    const inRx = rx * 0.87;
-    const inRy = ry * 0.83;
+    const inRx = rx * 0.84;
+    const inRy = ry * 0.8;
     const faceGrad = g.createLinearGradient(cx - inRx, topY - inRy, cx + inRx, topY + inRy);
     faceGrad.addColorStop(0, pal.faceDark);
     faceGrad.addColorStop(0.28, pal.faceMid);
@@ -1193,10 +1248,17 @@ export class CoinsView {
     g.ellipse(cx, topY + ry * 0.03, inRx, inRy, 0, Math.PI * 1.05, Math.PI * 1.95);
     g.stroke();
 
-    g.strokeStyle = 'rgba(255, 252, 224, 0.5)';
+    g.strokeStyle = 'rgba(255, 252, 224, 0.4)';
     g.lineWidth = Math.max(0.8, 0.9 * this.dpr);
     g.beginPath();
     g.ellipse(cx, topY + ry * 0.03, inRx, inRy, 0, 0.08, Math.PI - 0.08);
+    g.stroke();
+
+    // Sutil cordoncillo interior acuñado para dar relieve numismático a la cara superior.
+    g.strokeStyle = 'rgba(34, 24, 10, 0.22)';
+    g.lineWidth = Math.max(0.75, 0.85 * this.dpr);
+    g.beginPath();
+    g.ellipse(cx, topY + ry * 0.03, inRx * 0.78, inRy * 0.78, 0, 0, Math.PI * 2);
     g.stroke();
 
     // 4. Filo brillante superior del bisel delantero.
@@ -1210,20 +1272,6 @@ export class CoinsView {
 
     this.spriteCache.set(key, c);
     return c;
-  }
-
-  private drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number, shRx: number, shRy: number, alpha: number): void {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1, shRy / shRx);
-    const sg = ctx.createRadialGradient(0, 0, shRx * 0.18, 0, 0, shRx);
-    sg.addColorStop(0, this.isLight ? `rgba(55, 36, 12, ${alpha * 0.45})` : `rgba(0, 0, 0, ${alpha})`);
-    sg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = sg;
-    ctx.beginPath();
-    ctx.arc(0, 0, shRx, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
   }
 
   draw(f: AltFrame): void {
@@ -1240,17 +1288,11 @@ export class CoinsView {
     const focusId = f.selected >= 0 ? f.selected : f.hovered;
     const milestoneSet = new Set(f.milestoneIds);
 
-    // 1. Halo ambiental cálido dorado detrás de las monedas.
-    const centerX = W / 2;
-    const centerY = H * 0.52;
-    const haloR = Math.max(W, H) * 0.42;
-    const halo = ctx.createRadialGradient(centerX, centerY, rx * 0.5, centerX, centerY, haloR);
-    halo.addColorStop(0, this.isLight ? 'rgba(235, 182, 74, 0.2)' : 'rgba(240, 192, 92, 0.12)');
-    halo.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(0, 0, W, H);
+    // 1. Plano de estudio común bajo las pilas (horizonte sutil + superficie mate oscura).
+    const horizonY = this.tableTopY - ry * 1.1;
+    drawStudioSurface(ctx, W, H, horizonY, W / 2, rx * 2.8, this.isLight);
 
-    // 2. Sombras bajo las pilas que tienen al menos una moneda apilada (sin fantasmas).
+    // 2. Sombras de contacto direccionales (luz arriba-izquierda → proyección abajo-derecha) bajo las pilas activas.
     for (const st of this.stacks) {
       let hasStacked = false;
       for (let r = 0; r < st.ids.length; r++) {
@@ -1262,20 +1304,27 @@ export class CoinsView {
         }
       }
       if (!hasStacked) continue;
-      this.drawShadow(ctx, st.bx, st.by + ry * 0.35, rx * 1.3, ry * 1.5, 0.64);
+      drawStudioShadow(ctx, st.bx, st.by + ry * 0.28, rx * 1.08, ry * 1.18, this.isLight, 0.95);
     }
 
-    // Sombras de contacto para monedas sueltas raíz o arrastradas (se encogen y suavizan con la altura).
+    // Sombras de contacto para monedas sueltas raíz o arrastradas (se desplazan hacia abajo-derecha con la altura).
     for (let id = 0; id < f.landed; id++) {
       const m = this.mode[id];
       if (m !== MODE_LOOSE && m !== MODE_DRAGGED) continue;
-      if (m === MODE_LOOSE && this.parent[id] >= 0) continue; // La sombra la dibuja la moneda base de la torre libre.
+      if (m === MODE_LOOSE && this.parent[id] >= 0) continue;
       const fy = m === MODE_DRAGGED ? Math.max(this.tableTopY, Math.min(this.tableBotY, this.py[id] + ry * 2.5)) : this.floorY[id];
       const height = Math.max(0, fy - this.py[id]);
-      const hScale = Math.max(0.55, 1 - height / (rx * 6));
-      const baseAlpha = m === MODE_LOOSE && this.looseChildOf(id) >= 0 ? 0.62 : 0.55;
-      const alpha = Math.max(0.16, baseAlpha * hScale);
-      this.drawShadow(ctx, this.px[id], fy + thick + ry * 0.25, rx * (1.16 * (2 - hScale * 0.85)), ry * 1.25, alpha);
+      const hScale = Math.max(0.45, 1 - height / (rx * 5.5));
+      const baseStrength = m === MODE_LOOSE && this.looseChildOf(id) >= 0 ? 0.9 : 0.78;
+      drawStudioShadow(
+        ctx,
+        this.px[id] + height * 0.14,
+        fy + thick + ry * 0.2,
+        rx * (1.02 + (1 - hScale) * 0.35),
+        ry * (1.08 + (1 - hScale) * 0.3),
+        this.isLight,
+        Math.max(0.24, baseStrength * hScale),
+      );
     }
 
     // 3. Construir orden de pintado 3D real (plano de profundidad → altura → monedas agarradas siempre encima).
@@ -1331,16 +1380,16 @@ export class CoinsView {
 
       if (isFocus) {
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = this.isLight ? '#9c6212' : '#fff5b8';
+        ctx.strokeStyle = this.isLight ? '#78603a' : '#d8c7a3';
         ctx.lineWidth = Math.max(1.5, 1.8 * this.dpr);
         ctx.beginPath();
         ctx.ellipse(cx, topY, rx + 1.5 * this.dpr, ry + 1 * this.dpr, rot, 0, Math.PI * 2);
         ctx.stroke();
       } else if (id === this.snapPreviewId) {
-        // Destello dorado sutil para indicar que al soltar se apilará sobre esta moneda.
-        ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = this.isLight ? '#b57410' : '#ffe88a';
-        ctx.lineWidth = Math.max(1.8, 2.2 * this.dpr);
+        // Borde discreto en latón envejecido para indicar destino de apilado.
+        ctx.globalAlpha = 0.88;
+        ctx.strokeStyle = this.isLight ? '#876d44' : '#c7b084';
+        ctx.lineWidth = Math.max(1.6, 2 * this.dpr);
         ctx.setLineDash([4 * this.dpr, 3 * this.dpr]);
         ctx.beginPath();
         ctx.ellipse(cx, topY - thick * 0.4, rx * 1.04, ry * 1.06, 0, 0, Math.PI * 2);
@@ -1349,13 +1398,13 @@ export class CoinsView {
       }
 
       if (milestoneSet.has(id) && !cut) {
-        const pulse = f.reducedMotion ? 0.85 : 0.45 + 0.55 * Math.sin(f.time / 480 + id);
+        const pulse = f.reducedMotion ? 0.7 : 0.35 + 0.35 * Math.sin(f.time / 520 + id);
         const sx = cx + rx * 0.62;
         const sy = topY - ry * 0.2;
-        const gr = 10 * this.dpr;
+        const gr = 7 * this.dpr;
         const mg = ctx.createRadialGradient(sx, sy, 0, sx, sy, gr);
-        mg.addColorStop(0, `rgba(255, 245, 190, ${pulse})`);
-        mg.addColorStop(1, 'rgba(255, 210, 110, 0)');
+        mg.addColorStop(0, `rgba(224, 210, 178, ${pulse})`);
+        mg.addColorStop(1, 'rgba(184, 157, 108, 0)');
         ctx.globalAlpha = 1;
         ctx.fillStyle = mg;
         ctx.beginPath();
