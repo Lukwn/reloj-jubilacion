@@ -156,7 +156,7 @@ export class ClepsydraView {
     this.isLight = matchMedia('(prefers-color-scheme: light)').matches;
   }
 
-  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 3)): void {
+  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2)): void {
     this.dpr = dpr;
     const W = Math.round(cssW * dpr);
     const H = Math.round(cssH * dpr);

@@ -99,6 +99,16 @@ export class Renderer {
   private relief: Uint16Array = new Uint16Array(0);
   private sparkle: Uint8Array = new Uint8Array(0);
 
+  /** Capas estáticas pre-renderizadas (estudio, trasera y vidrio/metal delantero) para 60/120 fps en móvil. */
+  private bgLayer = document.createElement('canvas');
+  private frameBackLayer = document.createElement('canvas');
+  private frameFrontLayer = document.createElement('canvas');
+  private layerX = 0;
+  private layerY = 0;
+  private layersDirty = true;
+  private sandDirty = true;
+  private lastSandKey = '';
+
   /** Los granos se dibujan como canicas redondas en vez de píxeles. */
   marbles = false;
 
@@ -125,6 +135,7 @@ export class Renderer {
     this.colors = colors;
     this.dim = dim;
     this.groupOf = groupOf;
+    this.sandDirty = true;
   }
 
   refreshTheme(): void {
@@ -147,9 +158,10 @@ export class Renderer {
       ambientCool: v('--ambient-cool') || (isLight ? 'rgba(92,148,220,0.1)' : 'rgba(100,152,255,0.08)'),
       isLight,
     };
+    this.layersDirty = true;
   }
 
-  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 3)): void {
+  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2)): void {
     this.dpr = dpr;
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
@@ -167,6 +179,8 @@ export class Renderer {
     this.buildGlassPaths();
     this.shine = this.buildShine();
     this.relief = this.buildRelief();
+    this.layersDirty = true;
+    this.sandDirty = true;
   }
 
   /** Semiancho exterior del vidrio a la altura y (en celdas), con garganta soplada orgánica. */
@@ -184,12 +198,12 @@ export class Renderer {
     return base * (1 + waistBoost * 0.55);
   }
 
-  /** Construye contorno exterior, pared interior y banda sólida de cristal (even-odd) para refracción real. */
+  /** Construye contorno exterior, pared interior y banda sólida de cristal (even-odd) con vértices óptimos para GPU móvil. */
   private buildGlassPaths(): void {
     const { H, W } = this.hg;
     const s = this.s;
     const cx = this.ox + (W / 2) * s;
-    const n = Math.max(260, H * 6);
+    const n = 96;
     const yAt = (y: number) => this.oy + y * s;
 
     const outer = new Path2D();
@@ -323,13 +337,12 @@ export class Renderer {
     return this.marbles ? this.s * 0.46 : Math.max(1.35 * this.dpr, this.s * 0.68);
   }
 
-  /** Dibuja la arena con suavizado fino (sin bloques pixelados bruscos) y oclusión ambiental en bordes. */
+  /** Dibuja la arena con suavizado bilineal rápido en GPU. */
   private drawSand(ctx: CanvasRenderingContext2D): void {
     const { hg, s } = this;
     if (!this.marbles) {
-      // Suavizado bilineal fino para que la arena parezca sílice real y no píxeles cuadrados.
       ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+      ctx.imageSmoothingQuality = 'medium';
       ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
       return;
     }
@@ -460,56 +473,132 @@ export class Renderer {
     };
   }
 
+  /** Pre-renderiza las capas estáticas (estudio, trasera y cristal+metal delantero) en lienzos offscreen. */
+  private rebuildStaticLayers(): void {
+    const W = Math.max(1, this.canvas.width);
+    const H = Math.max(1, this.canvas.height);
+    const f = this.frame();
+    const pad = Math.ceil(16 * this.dpr);
+    const thick = Math.max(9 * this.dpr, f.capH * 0.58);
+    const x0 = Math.max(0, Math.floor(f.cx - f.capHalf - pad));
+    const y0 = Math.max(0, Math.floor(f.top - thick - f.capRy * 1.4 - pad));
+    const x1 = Math.min(W, Math.ceil(f.cx + f.capHalf + pad));
+    const y1 = Math.min(H, Math.ceil(f.bottom + f.capH * 0.08 + thick + f.capRy * 1.4 + pad));
+    const lw = Math.max(1, x1 - x0);
+    const lh = Math.max(1, y1 - y0);
+
+    this.layerX = x0;
+    this.layerY = y0;
+
+    this.bgLayer.width = W;
+    this.bgLayer.height = H;
+    this.frameBackLayer.width = lw;
+    this.frameBackLayer.height = lh;
+    this.frameFrontLayer.width = lw;
+    this.frameFrontLayer.height = lh;
+
+    const origCtx = this.ctx;
+
+    // 1. Fondo de estudio + sombra de contacto.
+    const bgCtx = this.bgLayer.getContext('2d')!;
+    bgCtx.clearRect(0, 0, W, H);
+    this.ctx = bgCtx;
+    this.drawSurroundings();
+
+    // 2. Trasera del bastidor y fondo interior del vidrio.
+    const backCtx = this.frameBackLayer.getContext('2d')!;
+    backCtx.clearRect(0, 0, lw, lh);
+    backCtx.save();
+    backCtx.translate(-x0, -y0);
+    this.ctx = backCtx;
+    this.drawPedestalBack();
+    this.drawRearPillar();
+    backCtx.fillStyle = this.theme.glassFill;
+    backCtx.fill(this.glassOuter);
+    this.drawGlassBack();
+    backCtx.restore();
+
+    // 3. Vidrio delantero, columnas laterales y pedestales 3D.
+    const frontCtx = this.frameFrontLayer.getContext('2d')!;
+    frontCtx.clearRect(0, 0, lw, lh);
+    frontCtx.save();
+    frontCtx.translate(-x0, -y0);
+    this.ctx = frontCtx;
+    this.drawGlassFront();
+    this.drawSidePillars();
+    this.drawPedestalsFront();
+    frontCtx.restore();
+
+    this.ctx = origCtx;
+    this.layersDirty = false;
+  }
+
   draw(f: DrawFrame): void {
     const { ctx, hg, s, dpr, theme } = this;
     const { H, W } = hg;
 
-    // 1. Preparar mapa de arena con sombreado 3D direccional, cresta superior iluminada y destellos de cuarzo.
-    const grid = this.sim.grid;
-    const buf = this.buf;
-    const colors = this.colors;
+    if (this.layersDirty) this.rebuildStaticLayers();
+
+    // 1. Actualizar mapa de arena solo cuando hay movimiento, resaltado nuevo o cambio de paleta.
     const { dim, groupOf } = this;
     const hl = dim && groupOf ? f.highlight : -1;
     const cut = dim ? f.cutoff : -1;
-    if (dim && (hl >= 0 || cut >= 0)) {
-      for (let i = 0; i < grid.length; i++) {
-        const v = grid[i];
-        if (v <= 0) {
-          buf[i] = 0;
-          continue;
-        }
-        const id = v - 1;
-        const faded = (cut >= 0 && id >= cut) || (hl >= 0 && groupOf![id] !== hl);
-        buf[i] = faded ? dim[id] : colors[id];
-      }
-    } else {
-      for (let i = 0; i < grid.length; i++) {
-        const v = grid[i];
-        buf[i] = v > 0 ? colors[v - 1] : 0;
-      }
-    }
+    const sandKey = `${hl}|${cut}|${this.sim.activeCount}|${this.sim.pendingActive}|${this.sim.sorting ? 1 : 0}|${f.heroes.length}|${f.finger ? 1 : 0}`;
+    const needsSandUpdate =
+      this.sandDirty ||
+      this.sim.activeCount > 0 ||
+      this.sim.pendingActive > 0 ||
+      this.sim.sorting ||
+      f.heroes.length > 0 ||
+      !!f.finger ||
+      sandKey !== this.lastSandKey;
 
-    if (!this.marbles) {
-      const relief = this.relief;
-      const sparkle = this.sparkle;
-      for (let i = 0; i < grid.length; i++) {
-        const c = buf[i];
-        if (c === 0) continue;
-        let k = relief[i];
-        // Superficie expuesta a la luz cenital: filo cálido más luminoso.
-        if (i >= W && grid[i - W] <= 0) k = (k * 296) >> 8;
-        // Micro-destello mineral de cuarzo.
-        const sp = sparkle[i];
-        const r = Math.min(255, (((c & 0xff) * k) >> 8) + sp);
-        const g = Math.min(255, ((((c >>> 8) & 0xff) * k) >> 8) + ((sp * 7) >> 3));
-        const b = Math.min(255, ((((c >>> 16) & 0xff) * k) >> 8) + (sp >> 1));
-        buf[i] = ((c & 0xff000000) | (b << 16) | (g << 8) | r) >>> 0;
+    if (needsSandUpdate) {
+      const grid = this.sim.grid;
+      const buf = this.buf;
+      const colors = this.colors;
+      if (dim && (hl >= 0 || cut >= 0)) {
+        for (let i = 0; i < grid.length; i++) {
+          const v = grid[i];
+          if (v <= 0) {
+            buf[i] = 0;
+            continue;
+          }
+          const id = v - 1;
+          const faded = (cut >= 0 && id >= cut) || (hl >= 0 && groupOf![id] !== hl);
+          buf[i] = faded ? dim[id] : colors[id];
+        }
+      } else {
+        for (let i = 0; i < grid.length; i++) {
+          const v = grid[i];
+          buf[i] = v > 0 ? colors[v - 1] : 0;
+        }
       }
+
+      if (!this.marbles) {
+        const relief = this.relief;
+        const sparkle = this.sparkle;
+        for (let i = 0; i < grid.length; i++) {
+          const c = buf[i];
+          if (c === 0) continue;
+          let k = relief[i];
+          // Superficie expuesta a la luz cenital: filo cálido más luminoso.
+          if (i >= W && grid[i - W] <= 0) k = (k * 296) >> 8;
+          // Micro-destello mineral de cuarzo.
+          const sp = sparkle[i];
+          const r = Math.min(255, (((c & 0xff) * k) >> 8) + sp);
+          const g = Math.min(255, ((((c >>> 8) & 0xff) * k) >> 8) + ((sp * 7) >> 3));
+          const b = Math.min(255, ((((c >>> 16) & 0xff) * k) >> 8) + (sp >> 1));
+          buf[i] = ((c & 0xff000000) | (b << 16) | (g << 8) | r) >>> 0;
+        }
+      }
+      this.offCtx.putImageData(this.img, 0, 0);
+      this.sandDirty = false;
+      this.lastSandKey = sandKey;
     }
-    this.offCtx.putImageData(this.img, 0, 0);
 
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    this.drawSurroundings();
+    ctx.drawImage(this.bgLayer, 0, 0);
 
     // Reloj girado: alrededor de su centro y escalado para que quepa entero con su estructura.
     this.rot = f.rotation ?? 0;
@@ -530,14 +619,8 @@ export class Renderer {
       ctx.translate(-c.x, -c.y);
     }
 
-    // 2. Columna trasera sutil + base trasera (orden 3D real: detrás del vidrio).
-    this.drawPedestalBack();
-    this.drawRearPillar();
-
-    // 3. Fondo del vidrio (cristal soplado con Fresnel y profundidad interior).
-    ctx.fillStyle = theme.glassFill;
-    ctx.fill(this.glassOuter);
-    this.drawGlassBack();
+    // 2–3. Trasera pre-renderizada (pedestal trasero, columna trasera y fondo de vidrio).
+    ctx.drawImage(this.frameBackLayer, this.layerX, this.layerY);
 
     // 4. Arena recortada al interior real de la pared de vidrio + embudo continuo en la garganta.
     ctx.save();
@@ -566,7 +649,6 @@ export class Renderer {
       const py = this.oy + h.y * s;
       const r = this.grainRadius();
       if (h.glow > 0.01) this.drawGlow(h, Math.max(7 * dpr, glowCells(5.5, 1.3)), h.glow * 0.72);
-      // Estela corta de caída hacia arriba.
       const tailLen = Math.max(6 * dpr, r * 5.2);
       const tg = ctx.createLinearGradient(px, py - tailLen, px, py);
       tg.addColorStop(0, 'rgba(243, 206, 128, 0)');
@@ -585,12 +667,8 @@ export class Renderer {
       ctx.fill();
     }
 
-    // 8. Vidrio delantero (pared gruesa con reflexión interna total, softboxes curvos y cintura 3D).
-    this.drawGlassFront();
-
-    // 9. Pedestales torneados 3D (arriba y abajo) y columnas laterales metálicas de precisión.
-    this.drawSidePillars();
-    this.drawPedestalsFront();
+    // 8–9. Vidrio delantero, columnas laterales y pedestales 3D pre-renderizados.
+    ctx.drawImage(this.frameFrontLayer, this.layerX, this.layerY);
 
     // Dedo removiendo la arena
     if (f.finger) {

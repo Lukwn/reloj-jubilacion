@@ -611,9 +611,9 @@ window.addEventListener('deviceorientation', (e) => {
   if (Math.hypot(gx, gy) < 0.35) return;
   const turn = ((screen.orientation?.angle ?? 0) * Math.PI) / 180;
   let phone = angleDelta(0, Math.atan2(gx, gy) - turn);
-  if (Math.abs(phone) < 0.08) phone = 0;
-  const target = phone + 0.5 * Math.sin(phone);
-  gyroAngle += angleDelta(gyroAngle, target) * 0.3;
+  if (Math.abs(phone) < 0.11) phone = 0;
+  const target = phone + 0.25 * Math.sin(phone);
+  gyroAngle += angleDelta(gyroAngle, target) * 0.25;
   if (w.altView instanceof CoinsView || w.altView instanceof ClepsydraView) {
     w.altView.setTilt(gyroAngle);
     return;
@@ -622,7 +622,8 @@ window.addEventListener('deviceorientation', (e) => {
   const moved = Math.abs(angleDelta(w.sim.gravityAngle, gyroAngle));
   w.sim.gravityAngle = gyroAngle;
   const now = performance.now();
-  if (moved > 0.03 && now - lastGyroWake > 150) {
+  // Evita despertar los ~15.000 granos por micro-temblores normales de la mano en Android.
+  if (moved > 0.09 && now - lastGyroWake > 320) {
     w.sim.wakeAll();
     lastGyroWake = now;
   }
@@ -1777,6 +1778,9 @@ function frame(now: number): void {
 }
 
 let lastShownLifeSec = -1;
+let lastSimTickAt = 0;
+let simStepAccum = 0;
+const SIM_STEP_MS = 1000 / 120; // 120 pasos/s fijos (equivale a 2 pasos a 60 Hz sin acelerarse a 120/144 Hz).
 
 function tick(now: number): void {
   fpsFrames++;
@@ -1847,19 +1851,27 @@ function tick(now: number): void {
   keepTodayAtNeck(w);
 
   const sim = w.sim!;
-  sim.step();
-  sim.step();
+  const dtSim = lastSimTickAt > 0 ? Math.max(0, Math.min(50, now - lastSimTickAt)) : 16.67;
+  lastSimTickAt = now;
+  simStepAccum = Math.min(SIM_STEP_MS * 3, simStepAccum + dtSim);
+  let steps = 0;
+  while (simStepAccum >= SIM_STEP_MS && steps < 3) {
+    sim.step();
+    simStepAccum -= SIM_STEP_MS;
+    steps++;
+  }
   if (sim.sorting) {
-    // Unos 50 fotogramas: algo menos de un segundo.
+    // Unos 50 fotogramas a 60 Hz (~0,85 s reales a cualquier refresco).
     if (reducedMotion) while (sim.sortStep(1));
-    else sim.sortStep(1 / 50);
+    else sim.sortStep(dtSim / 840);
     dugSinceFrame += 40;
     if (!sim.sorting) endSort();
   }
   sound.setActivity(sim.activeCount / 2500 + dugSinceFrame / 150);
   dugSinceFrame = 0;
-  sim.agitation = sim.agitation > 0.02 ? sim.agitation * 0.9 : 0;
-  sim.tilt = Math.abs(sim.tilt) > 0.02 ? sim.tilt * 0.93 : 0;
+  const frameScale = dtSim / 16.67;
+  sim.agitation = sim.agitation > 0.02 ? sim.agitation * Math.pow(0.9, frameScale) : 0;
+  sim.tilt = Math.abs(sim.tilt) > 0.02 ? sim.tilt * Math.pow(0.93, frameScale) : 0;
 
   const heroes: HeroDraw[] = w.heroes.map((h) => {
     const p = heroPoint(h);
