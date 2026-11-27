@@ -99,8 +99,9 @@ export class Renderer {
   private relief: Uint16Array = new Uint16Array(0);
   private sparkle: Uint8Array = new Uint8Array(0);
 
-  /** Capas estáticas pre-renderizadas (estudio, trasera y vidrio/metal delantero) para 60/120 fps en móvil. */
+  /** Capas estáticas pre-renderizadas (estudio recortado abajo, trasera y vidrio/metal delantero). */
   private bgLayer = document.createElement('canvas');
+  private bgLayerY = 0;
   private frameBackLayer = document.createElement('canvas');
   private frameFrontLayer = document.createElement('canvas');
   private layerX = 0;
@@ -161,7 +162,7 @@ export class Renderer {
     this.layersDirty = true;
   }
 
-  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2)): void {
+  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 3)): void {
     this.dpr = dpr;
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
@@ -198,12 +199,12 @@ export class Renderer {
     return base * (1 + waistBoost * 0.55);
   }
 
-  /** Construye contorno exterior, pared interior y banda sólida de cristal (even-odd) con vértices óptimos para GPU móvil. */
+  /** Construye contorno exterior, pared interior y banda sólida de cristal (even-odd) con curva suave y pocos vértices. */
   private buildGlassPaths(): void {
     const { H, W } = this.hg;
     const s = this.s;
     const cx = this.ox + (W / 2) * s;
-    const n = 96;
+    const n = 120;
     const yAt = (y: number) => this.oy + y * s;
 
     const outer = new Path2D();
@@ -337,13 +338,13 @@ export class Renderer {
     return this.marbles ? this.s * 0.46 : Math.max(1.35 * this.dpr, this.s * 0.68);
   }
 
-  /** Dibuja la arena con suavizado bilineal rápido en GPU. */
+  /** Dibuja la arena con granos nítidos (sin difuminado borroso ni reescalado bicúbico costoso). */
   private drawSand(ctx: CanvasRenderingContext2D): void {
     const { hg, s } = this;
     if (!this.marbles) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'medium';
+      ctx.imageSmoothingEnabled = false;
       ctx.drawImage(this.off, this.ox, this.oy, hg.W * s, hg.H * s);
+      ctx.imageSmoothingEnabled = true;
       return;
     }
     const buf = this.buf;
@@ -490,8 +491,14 @@ export class Renderer {
     this.layerX = x0;
     this.layerY = y0;
 
+    // Recortar el plano de estudio a solo la franja inferior visible (evita copiar el 80 % superior transparente).
+    const baseBottomY = f.bottom + f.capH * 0.78;
+    const bgY = Math.max(0, Math.floor(baseBottomY - f.capRy * 2.6 - 8 * this.dpr));
+    const bgH = Math.max(1, H - bgY);
+    this.bgLayerY = bgY;
+
     this.bgLayer.width = W;
-    this.bgLayer.height = H;
+    this.bgLayer.height = bgH;
     this.frameBackLayer.width = lw;
     this.frameBackLayer.height = lh;
     this.frameFrontLayer.width = lw;
@@ -499,11 +506,14 @@ export class Renderer {
 
     const origCtx = this.ctx;
 
-    // 1. Fondo de estudio + sombra de contacto.
+    // 1. Fondo de estudio + sombra de contacto (solo la franja inferior).
     const bgCtx = this.bgLayer.getContext('2d')!;
-    bgCtx.clearRect(0, 0, W, H);
+    bgCtx.clearRect(0, 0, W, bgH);
+    bgCtx.save();
+    bgCtx.translate(0, -bgY);
     this.ctx = bgCtx;
     this.drawSurroundings();
+    bgCtx.restore();
 
     // 2. Trasera del bastidor y fondo interior del vidrio.
     const backCtx = this.frameBackLayer.getContext('2d')!;
@@ -598,7 +608,7 @@ export class Renderer {
     }
 
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.drawImage(this.bgLayer, 0, 0);
+    ctx.drawImage(this.bgLayer, 0, this.bgLayerY);
 
     // Reloj girado: alrededor de su centro y escalado para que quepa entero con su estructura.
     this.rot = f.rotation ?? 0;

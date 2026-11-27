@@ -395,7 +395,7 @@ export class CoinsView {
     this.spriteCache.clear();
   }
 
-  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2)): void {
+  resize(cssW = window.innerWidth, cssH = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 3)): void {
     const oldW = this.prevW;
     const oldH = this.prevH;
     this.dpr = dpr;

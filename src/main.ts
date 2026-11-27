@@ -611,9 +611,9 @@ window.addEventListener('deviceorientation', (e) => {
   if (Math.hypot(gx, gy) < 0.35) return;
   const turn = ((screen.orientation?.angle ?? 0) * Math.PI) / 180;
   let phone = angleDelta(0, Math.atan2(gx, gy) - turn);
-  if (Math.abs(phone) < 0.11) phone = 0;
-  const target = phone + 0.25 * Math.sin(phone);
-  gyroAngle += angleDelta(gyroAngle, target) * 0.25;
+  if (Math.abs(phone) < 0.08) phone = 0;
+  const target = phone + 0.5 * Math.sin(phone);
+  gyroAngle += angleDelta(gyroAngle, target) * 0.3;
   if (w.altView instanceof CoinsView || w.altView instanceof ClepsydraView) {
     w.altView.setTilt(gyroAngle);
     return;
@@ -622,8 +622,7 @@ window.addEventListener('deviceorientation', (e) => {
   const moved = Math.abs(angleDelta(w.sim.gravityAngle, gyroAngle));
   w.sim.gravityAngle = gyroAngle;
   const now = performance.now();
-  // Evita despertar los ~15.000 granos por micro-temblores normales de la mano en Android.
-  if (moved > 0.09 && now - lastGyroWake > 320) {
+  if (moved > 0.05 && now - lastGyroWake > 220) {
     w.sim.wakeAll();
     lastGyroWake = now;
   }
