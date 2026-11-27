@@ -142,6 +142,14 @@ export class ClepsydraView {
   private playDropAccum = 0;
   private lastFraction = 0;
 
+  // Chorro continuo de flujo variable en modo Play (0 = goteo, 0.22..1 = hilo fino → chorro pleno).
+  private streamFlow = 0;
+  private streamLength = 0;
+  private streamPhase = 0;
+  private streamRippleAccum = 0;
+  private streamBeadAccum = 0;
+  private streamSoundAccum = 0;
+
   constructor(
     private canvas: HTMLCanvasElement,
     private life: Life,
@@ -655,6 +663,81 @@ export class ClepsydraView {
     }
   }
 
+  /** Intensidad objetivo del chorro continuo (0..1) en función de la velocidad de Play (días/s). */
+  private targetStreamFlow(playSpeed: number, fraction: number): number {
+    if (playSpeed <= 1.5 || fraction >= 1) return 0;
+    const lo = Math.log10(7); // 1 semana/s → hilo fino
+    const hi = Math.log10(1826); // 5 años/s → chorro pleno
+    const t = Math.max(0, Math.min(1, (Math.log10(playSpeed) - lo) / (hi - lo)));
+    return 0.22 + t * 0.78;
+  }
+
+  /**
+   * Calcula la trayectoria en coordenadas de mundo del chorro desde la boquilla hasta
+   * la superficie real (inclinada) del decantador inferior.
+   */
+  private streamEndpoints(surfBot: number, botSlosh: number): {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    impactLocX: number;
+    impactLocY: number;
+    insideLower: boolean;
+  } {
+    const startW = this.localToWorld(this.cx, this.nozzleY - 1.2 * this.dpr);
+    const floorY = this.lowerInnerFloorY();
+    const tanBot = Math.tan(botSlosh);
+    const gx = Math.sin(this.worldGravityAngle);
+    const gy = Math.cos(this.worldGravityAngle);
+
+    // Avanza a lo largo de la gravedad real desde la boquilla hasta intersectar la superficie inferior.
+    const approxDist = Math.max(24 * this.dpr, this.botY - this.nozzleY);
+    let endW = { x: startW.x + gx * approxDist, y: startW.y + gy * approxDist };
+    let impactLoc = this.worldToLocal(endW.x, endW.y);
+    let insideLower = false;
+
+    const steps = 28;
+    for (let i = 1; i <= steps; i++) {
+      const dist = (i / steps) * (this.botY - this.nozzleY + 28 * this.dpr);
+      const wx = startW.x + gx * dist;
+      const wy = startW.y + gy * dist;
+      const loc = this.worldToLocal(wx, wy);
+      const surfAtX = surfBot + (loc.x - this.cx) * tanBot;
+      const hitY = Math.min(floorY - 1.5 * this.dpr, surfAtX);
+      if (loc.y >= hitY) {
+        // Refinamiento lineal en el paso de impacto para contacto exacto con la superficie.
+        const prevDist = ((i - 1) / steps) * (this.botY - this.nozzleY + 28 * this.dpr);
+        const prevLoc = this.worldToLocal(startW.x + gx * prevDist, startW.y + gy * prevDist);
+        const prevSurf = Math.min(floorY - 1.5 * this.dpr, surfBot + (prevLoc.x - this.cx) * tanBot);
+        const d0 = prevLoc.y - prevSurf;
+        const d1 = loc.y - hitY;
+        const frac = d1 !== d0 ? Math.max(0, Math.min(1, -d0 / (d1 - d0))) : 1;
+        const exactDist = prevDist + (dist - prevDist) * frac;
+        endW = { x: startW.x + gx * exactDist, y: startW.y + gy * exactDist };
+        impactLoc = this.worldToLocal(endW.x, endW.y);
+        const halfWall = this.lowerInnerHalfAt(Math.min(floorY, Math.max(this.lowerTopY, impactLoc.y)));
+        insideLower = Math.abs(impactLoc.x - this.cx) <= halfWall + 4 * this.dpr;
+        if (!insideLower) {
+          impactLoc.x = this.cx + Math.sign(impactLoc.x - this.cx) * Math.max(4 * this.dpr, halfWall - 2 * this.dpr);
+          endW = this.localToWorld(impactLoc.x, impactLoc.y);
+          insideLower = true;
+        }
+        break;
+      }
+    }
+
+    return {
+      x0: startW.x,
+      y0: startW.y,
+      x1: endW.x,
+      y1: endW.y,
+      impactLocX: impactLoc.x,
+      impactLocY: impactLoc.y,
+      insideLower,
+    };
+  }
+
   private stepPhysics(dt: number, f: ClepsydraFrame): void {
     // 1. Dinámica rígida del instrumento completo (giro con peso + retorno elástico) acoplada al oleaje real del agua.
     const subSteps = 4;
@@ -723,24 +806,47 @@ export class ClepsydraView {
     this.stepWave(this.topH, this.topV, dt);
     this.stepWave(this.botH, this.botV, dt);
 
-    // 3. Simulación del fondo del agua superior y desprendimiento sincronizado al segundo real (o modo Play).
-    if (f.fraction < 1) {
-      if (f.playSpeed > 0) {
-        const rate = Math.min(11, Math.max(2.4, 2.2 + Math.log10(f.playSpeed + 1) * 3.1));
-        this.playDropAccum += (dt / 1000) * rate;
-        while (this.playDropAccum >= 1) {
-          this.playDropAccum -= 1;
-          if (this.drops.length < 16) this.detachDrop(true);
-        }
-        this.stepBottomInterface(dt, this.playDropAccum, true, lastNozzleAx);
-      } else {
-        if (this.lastDoneSec >= 0 && f.doneSec > this.lastDoneSec) {
-          this.detachDrop(false);
-        }
-        this.stepBottomInterface(dt, f.subSec, true, lastNozzleAx);
-      }
-    } else {
+    // 3. Simulación del fondo del agua superior, goteo o chorro continuo de flujo variable en modo Play.
+    const wantStream = this.targetStreamFlow(f.playSpeed, f.fraction);
+    const prevStreamActive = this.streamFlow > 0.08;
+    const flowEase = 1 - Math.pow(wantStream > this.streamFlow ? 0.8 : 0.74, dt / 16);
+    this.streamFlow += (wantStream - this.streamFlow) * flowEase;
+    if (this.streamFlow < 0.01 && wantStream === 0) this.streamFlow = 0;
+
+    if (this.streamFlow > 0.06) {
+      // El chorro desciende físicamente por gravedad hasta alcanzar la superficie inferior.
+      const growRate = (0.0052 + this.streamFlow * 0.0042) * dt;
+      this.streamLength = Math.min(1, this.streamLength + growRate);
+      this.streamPhase += dt * (0.014 + this.streamFlow * 0.024);
+      // En modo chorro la boquilla queda abierta y continua (sin formar gota colgante detrás).
       this.stepBottomInterface(dt, 0, false, 0);
+      this.playDropAccum = 0;
+    } else {
+      // Al frenar o pausar el chorro, se corta limpiamente soltando una última gota residual.
+      if (prevStreamActive && this.streamLength > 0.35 && f.fraction < 1 && this.drops.length < 16) {
+        this.detachDrop(true);
+      }
+      this.streamLength = Math.max(0, this.streamLength - dt * 0.011);
+
+      if (f.fraction < 1) {
+        if (f.playSpeed > 0) {
+          // Velocidad 1 día/s: goteo rápido continuo antes de pasar a chorro.
+          const rate = 3.8;
+          this.playDropAccum += (dt / 1000) * rate;
+          while (this.playDropAccum >= 1) {
+            this.playDropAccum -= 1;
+            if (this.drops.length < 16) this.detachDrop(true);
+          }
+          this.stepBottomInterface(dt, this.playDropAccum, true, lastNozzleAx);
+        } else {
+          if (this.lastDoneSec >= 0 && f.doneSec > this.lastDoneSec) {
+            this.detachDrop(false);
+          }
+          this.stepBottomInterface(dt, f.subSec, true, lastNozzleAx);
+        }
+      } else {
+        this.stepBottomInterface(dt, 0, false, 0);
+      }
     }
     this.lastDoneSec = f.doneSec;
 
@@ -753,6 +859,65 @@ export class ClepsydraView {
     const botSlosh = this.botLocalSlosh();
     const tanBot = Math.tan(botSlosh);
     const spanX = this.R * 1.12;
+
+    // 3b. Agitación continua, ondas, salpicaduras y sonido proporcionales al caudal del chorro en el punto de impacto.
+    if (this.streamFlow > 0.06 && this.streamLength > 0.92 && f.fraction < 1) {
+      const ep = this.streamEndpoints(surfBot, botSlosh);
+      if (ep.insideLower) {
+        const fl = this.streamFlow;
+        const cIdx = Math.max(
+          2,
+          Math.min(WAVE_N - 3, Math.round(((ep.impactLocX - (this.cx - spanX)) / (2 * spanX)) * (WAVE_N - 1))),
+        );
+        // Depresión + vibración continua en el punto donde penetra el chorro.
+        const jitter = 0.65 + 0.35 * Math.sin(this.streamPhase * 1.9);
+        this.impulseCrater(this.botV, cIdx, (0.045 + fl * 0.14) * jitter * this.dpr * (dt / 16));
+        this.causticPulse = Math.min(1, Math.max(this.causticPulse, 0.28 + fl * 0.62));
+
+        // Ondas concéntricas continuas escaladas por el caudal.
+        const rippleRate = 3.2 + fl * 8.5;
+        this.streamRippleAccum += (dt / 1000) * rippleRate;
+        if (this.streamRippleAccum >= 1) {
+          this.streamRippleAccum -= 1;
+          const hw = Math.max(16 * this.dpr, this.lowerInnerHalfAt(Math.max(this.lowerTopY, Math.min(floorY, ep.impactLocY))));
+          const b = this.boreRadius();
+          this.ripples.push({
+            x: ep.impactLocX + (Math.random() - 0.5) * b * 0.35,
+            rx: b * (0.55 + fl * 0.75),
+            maxRx: Math.min(hw * (0.55 + fl * 0.36), (34 + fl * 38) * this.dpr),
+            alpha: 0.42 + fl * 0.4,
+            chamber: 'bot',
+          });
+        }
+
+        // Micro-salpicaduras proporcionales al caudal (casi nulas en hilo fino, vivas a 5 años/s).
+        const beadRate = fl * fl * 18;
+        this.streamBeadAccum += (dt / 1000) * beadRate;
+        while (this.streamBeadAccum >= 1 && this.beads.length < 22) {
+          this.streamBeadAccum -= 1;
+          const side = Math.random() < 0.5 ? -1 : 1;
+          const ang = -Math.PI * 0.5 + botSlosh + side * (0.28 + Math.random() * 0.48);
+          const spd = (0.06 + fl * 0.1 + Math.random() * 0.06) * this.dpr;
+          const b = this.boreRadius();
+          this.beads.push({
+            x: ep.impactLocX + side * b * (0.35 + fl * 0.45),
+            y: ep.impactLocY - 1.5 * this.dpr,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd,
+            r: (0.7 + fl * 0.75 + Math.random() * 0.4) * this.dpr,
+            life: 0.7 + fl * 0.35,
+          });
+        }
+
+        // Pulsos suaves de sonido de agua acordes al caudal.
+        const soundRate = 3.5 + fl * 5.5;
+        this.streamSoundAccum += (dt / 1000) * soundRate;
+        if (this.streamSoundAccum >= 1) {
+          this.streamSoundAccum = 0;
+          this.onDrop?.(0.18 + fl * 0.24);
+        }
+      }
+    }
 
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
@@ -1363,6 +1528,171 @@ export class ClepsydraView {
     ctx.restore();
   }
 
+  /**
+   * Chorro continuo de agua cristalina en coordenadas reales de mundo:
+   * grosor variable según la velocidad de Play, estrechamiento gravitatorio real (A·v = cte),
+   * ondulaciones capilares viajeras hacia abajo, reflejo softbox izquierdo y collar de impacto.
+   */
+  private drawWaterStream(ctx: CanvasRenderingContext2D, surfBot: number, botSlosh: number): void {
+    const fl = this.streamFlow;
+    const len = this.streamLength;
+    if (fl <= 0.03 || len <= 0.02) return;
+
+    const ep = this.streamEndpoints(surfBot, botSlosh);
+    const dx = ep.x1 - ep.x0;
+    const dy = ep.y1 - ep.y0;
+    const fullDist = Math.hypot(dx, dy);
+    if (fullDist < 4 * this.dpr) return;
+
+    const ux = dx / fullDist;
+    const uy = dy / fullDist;
+    // Perpendicular derecha a la dirección de caída.
+    const px = uy;
+    const py = -ux;
+
+    const b = this.boreRadius();
+    const r0 = Math.max(1.25 * this.dpr, b * (0.28 + 0.68 * Math.pow(fl, 0.78)));
+    const phase = this.streamPhase;
+    // Ligera curvatura lateral por inercia cuando se balancea el reloj mientras cae el chorro.
+    const swayMax = Math.max(-b * 2.4, Math.min(b * 2.4, -this.clockVel * this.R * 12 - this.clockVx * 10));
+
+    const steps = 28;
+    const leftPts: Array<{ x: number; y: number }> = [];
+    const rightPts: Array<{ x: number; y: number }> = [];
+    const centerPts: Array<{ x: number; y: number; r: number }> = [];
+
+    for (let i = 0; i <= steps; i++) {
+      const s = i / steps;
+      const t = s * len;
+      const dist = t * fullDist;
+
+      // Estrechamiento por aceleración gravitatoria (ecuación de continuidad A·v = constante).
+      const taper = 1 / Math.pow(1 + (0.68 - 0.28 * fl) * t, 0.34);
+      // Hilo fino: ondulaciones perladas (Plateau-Rayleigh); chorro grueso: vibración turbulenta viva.
+      const varicoseAmp = fl < 0.45 ? 0.16 * (1 - fl * 1.1) : 0.06 + (fl - 0.45) * 0.11;
+      const waveL =
+        Math.sin(t * (10 + fl * 6) - phase * 1.25) * varicoseAmp +
+        Math.sin(t * (19 + fl * 9) - phase * 2.15 + 0.8) * varicoseAmp * 0.42;
+      const waveR =
+        Math.sin(t * (10 + fl * 6) - phase * 1.25 + fl * 1.35) * varicoseAmp +
+        Math.sin(t * (19 + fl * 9) - phase * 2.15 + 2.1) * varicoseAmp * 0.42;
+
+      // En la boca (t≈0) se funde sin escalón con el ancho del chorro; en la punta si aún está bajando se redondea.
+      const tipCap = len < 0.99 && s > 0.88 ? Math.sqrt(Math.max(0.05, 1 - Math.pow((s - 0.88) / 0.12, 2))) : 1;
+      const flareBot = len > 0.94 && s > 0.9 ? 1 + ((s - 0.9) / 0.1) * (0.28 + fl * 0.35) : 1;
+      const rBase = r0 * taper * tipCap * flareBot;
+      const rL = Math.max(0.8 * this.dpr, rBase * (1 + waveL * Math.min(1, t * 4)));
+      const rR = Math.max(0.8 * this.dpr, rBase * (1 + waveR * Math.min(1, t * 4)));
+
+      // Ligera serpentina de flujo vivo en chorros rápidos + inercia del reloj.
+      const wiggle = Math.sin(t * 7.5 - phase * 0.95) * r0 * (0.04 + fl * 0.09) * Math.sin(s * Math.PI);
+      const sway = swayMax * s * (1 - s * 0.35) + wiggle;
+
+      const cx = ep.x0 + ux * dist + px * sway;
+      const cy = ep.y0 + uy * dist + py * sway;
+      leftPts.push({ x: cx - px * rL, y: cy - py * rL });
+      rightPts.push({ x: cx + px * rR, y: cy + py * rR });
+      centerPts.push({ x: cx, y: cy, r: (rL + rR) * 0.5 });
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(leftPts[0].x, leftPts[0].y);
+    for (let i = 1; i <= steps; i++) ctx.lineTo(leftPts[i].x, leftPts[i].y);
+    for (let i = steps; i >= 0; i--) ctx.lineTo(rightPts[i].x, rightPts[i].y);
+    ctx.closePath();
+
+    // Cuerpo óptico cristalino del chorro (coherente con el agua transparente en estudio oscuro).
+    const mid = centerPts[steps >> 1];
+    const spanR = Math.max(2 * this.dpr, r0 * 1.15);
+    const bodyGrad = ctx.createLinearGradient(
+      mid.x - px * spanR,
+      mid.y - py * spanR,
+      mid.x + px * spanR,
+      mid.y + py * spanR,
+    );
+    const alphaScale = Math.min(1, fl * 2.2);
+    if (this.isLight) {
+      bodyGrad.addColorStop(0, `rgba(255, 255, 255, ${0.72 * alphaScale})`);
+      bodyGrad.addColorStop(0.22, `rgba(176, 194, 204, ${0.42 * alphaScale})`);
+      bodyGrad.addColorStop(0.55, `rgba(130, 150, 162, ${0.34 * alphaScale})`);
+      bodyGrad.addColorStop(0.84, `rgba(190, 204, 212, ${0.44 * alphaScale})`);
+      bodyGrad.addColorStop(1, `rgba(74, 90, 100, ${0.38 * alphaScale})`);
+    } else {
+      bodyGrad.addColorStop(0, `rgba(240, 246, 250, ${0.62 * alphaScale})`);
+      bodyGrad.addColorStop(0.18, `rgba(196, 210, 218, ${0.24 * alphaScale})`);
+      bodyGrad.addColorStop(0.52, `rgba(116, 136, 148, ${0.2 * alphaScale})`);
+      bodyGrad.addColorStop(0.82, `rgba(224, 218, 204, ${0.24 * alphaScale})`);
+      bodyGrad.addColorStop(1, `rgba(232, 240, 246, ${0.42 * alphaScale})`);
+    }
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    // Brillos internos refractivos viajando hacia abajo por el chorro.
+    ctx.save();
+    ctx.clip();
+    const streaks = fl > 0.55 ? 3 : 2;
+    for (let k = 0; k < streaks; k++) {
+      const frac = ((phase * 0.14 + k / streaks) % 1) * len;
+      const idx = Math.max(0, Math.min(steps, Math.round((frac / Math.max(0.01, len)) * steps)));
+      const pt = centerPts[idx];
+      const shLen = fullDist * (0.14 + fl * 0.12);
+      const sg = ctx.createLinearGradient(
+        pt.x - ux * shLen * 0.5,
+        pt.y - uy * shLen * 0.5,
+        pt.x + ux * shLen * 0.5,
+        pt.y + uy * shLen * 0.5,
+      );
+      sg.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      sg.addColorStop(0.5, `rgba(248, 252, 255, ${(0.45 + fl * 0.25) * alphaScale})`);
+      sg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = sg;
+      ctx.lineWidth = Math.max(0.9 * this.dpr, pt.r * 0.42);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pt.x - px * pt.r * 0.32 - ux * shLen * 0.5, pt.y - py * pt.r * 0.32 - uy * shLen * 0.5);
+      ctx.lineTo(pt.x - px * pt.r * 0.32 + ux * shLen * 0.5, pt.y - py * pt.r * 0.32 + uy * shLen * 0.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Filo especular izquierdo continuo (key light de estudio) + contorno refractivo derecho suave.
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(leftPts[0].x, leftPts[0].y);
+    for (let i = 1; i <= steps; i++) ctx.lineTo(leftPts[i].x, leftPts[i].y);
+    ctx.strokeStyle = this.isLight
+      ? `rgba(255, 255, 255, ${0.72 * alphaScale})`
+      : `rgba(244, 248, 252, ${(0.52 + fl * 0.22) * alphaScale})`;
+    ctx.lineWidth = Math.max(0.9, (0.95 + fl * 0.45) * this.dpr);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rightPts[0].x, rightPts[0].y);
+    for (let i = 1; i <= steps; i++) ctx.lineTo(rightPts[i].x, rightPts[i].y);
+    ctx.strokeStyle = this.isLight
+      ? `rgba(54, 68, 78, ${0.28 * alphaScale})`
+      : `rgba(220, 228, 234, ${(0.24 + fl * 0.14) * alphaScale})`;
+    ctx.lineWidth = Math.max(0.75, 0.9 * this.dpr);
+    ctx.stroke();
+
+    // Corona luminosa de menisco en el punto exacto donde el chorro entra en el agua inferior.
+    if (len > 0.94 && ep.insideLower) {
+      const collarRx = r0 * (1.4 + fl * 1.15);
+      const collarRy = Math.max(1.8 * this.dpr, collarRx * 0.32);
+      const cg = ctx.createRadialGradient(ep.x1, ep.y1, collarRx * 0.1, ep.x1, ep.y1, collarRx * 1.25);
+      cg.addColorStop(0, `rgba(246, 250, 252, ${(0.42 + fl * 0.36) * alphaScale})`);
+      cg.addColorStop(0.55, `rgba(210, 222, 228, ${(0.18 + fl * 0.16) * alphaScale})`);
+      cg.addColorStop(1, 'rgba(210, 222, 228, 0)');
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.ellipse(ep.x1, ep.y1, collarRx * 1.25, collarRy * 1.6, this.botWorldSlosh, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
   /** Fondo trasero de la peana, columna trasera y aros de sujeción (detrás del vidrio). */
   private drawHardwareBack(ctx: CanvasRenderingContext2D): void {
     const pal = studioPalette(this.isLight);
@@ -1906,9 +2236,9 @@ export class ClepsydraView {
 
     this.drawHardwareBack(ctx);
 
-    // Cuerpo único de agua superior + extremo inferior simulado (menisco/pandeo/cuello en un solo trazado).
+    // Cuerpo único de agua superior + extremo inferior simulado (menisco/pandeo/cuello o salida al chorro).
     ctx.save();
-    this.traceUpperFluidPath(ctx, f.fraction < 1);
+    this.traceUpperFluidPath(ctx, f.fraction < 1 && this.streamFlow <= 0.06);
     ctx.clip();
     const upperBottomY = this.nozzleY + Math.max(0, this.tipY) + 4 * this.dpr;
     this.drawLiquid(ctx, surfTop, upperBottomY, this.topH, (y) => this.upperInnerHalfAt(y), f, true, topSlosh);
@@ -1919,6 +2249,30 @@ export class ClepsydraView {
     this.traceLowerPath(ctx, true);
     ctx.clip();
     this.drawLiquid(ctx, surfBot, this.lowerInnerFloorY() + 6 * this.dpr, this.botH, (y) => this.lowerInnerHalfAt(y), f, false, botSlosh);
+
+    // Micro-burbujas aireadas sumergidas bajo el impacto de un chorro medio/fuerte.
+    if (this.streamFlow > 0.38 && this.streamLength > 0.94 && f.fraction < 1) {
+      const ep = this.streamEndpoints(surfBot, botSlosh);
+      if (ep.insideLower) {
+        const fl = this.streamFlow;
+        const depthAvail = Math.max(4 * this.dpr, this.lowerInnerFloorY() - ep.impactLocY);
+        const count = Math.round(4 + fl * 8);
+        ctx.save();
+        for (let k = 0; k < count; k++) {
+          const cycle = (this.streamPhase * (0.09 + (k % 3) * 0.03) + k * 0.37) % 1;
+          const sink = Math.sin(cycle * Math.PI);
+          const bx = ep.impactLocX + Math.sin(k * 2.4 + this.streamPhase * 0.45) * (6 + fl * 16) * this.dpr * (0.4 + sink * 0.8);
+          const by = ep.impactLocY + Math.min(depthAvail * 0.85, (4 + sink * (12 + fl * 26)) * this.dpr);
+          const br = (0.75 + (k % 3) * 0.35 + fl * 0.45) * this.dpr;
+          ctx.strokeStyle = `rgba(240, 246, 250, ${(0.22 + fl * 0.32) * (1 - Math.abs(cycle - 0.5) * 1.7)})`;
+          ctx.lineWidth = Math.max(0.7, 0.85 * this.dpr);
+          ctx.beginPath();
+          ctx.arc(bx, by, br, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
 
     // Doble aro de onda superficial 3D apoyado sobre el ángulo real de la superficie inferior.
     for (const rp of this.ripples) {
@@ -1954,7 +2308,8 @@ export class ClepsydraView {
 
     ctx.restore();
 
-    // 6. Gotas desprendidas en coordenadas reales de mundo (caen en vertical real; delante de boca trasera, detrás de cristal frontal).
+    // 6. Chorro continuo (en Play) y gotas desprendidas en coordenadas reales de mundo (delante de boca trasera, detrás de cristal frontal).
+    this.drawWaterStream(ctx, surfBot, botSlosh);
     for (const d of this.drops) this.drawFallingDrop(ctx, d);
 
     // 7–8. Cristal óptico delantero, graduaciones y estructura metálica rotados solidariamente con el reloj.
